@@ -10,69 +10,19 @@ import soundfile as sf
 from pynput import keyboard  
 
 class KeyboardMIDI:
-    def __init__(self, synth):
+    def __init__(self, synth, master):
         self.synth = synth
         self.octave_offset = 0  # 0 = oitava central
+        self.master = master  # Referência ao master para atualizações de UI
         self.key_to_note = {
-    # --------------------------------------------------
-    # Primeira Oitava (C3 - B3) - Teclas Z a M
-    # --------------------------------------------------
-    'z': 48,  # C3
+    # Primeira Oitava (C3-B3)
+    'z': 48, 'x': 50, 'c': 52, 'v': 53, 'b': 55, 'n': 57, 'm': 59,
     's': 49,  # C#3
-    'x': 50,  # D3
-    'd': 51,  # D#3
-    'c': 52,  # E3
-    'v': 53,  # F3
-    'g': 54,  # F#3
-    'b': 55,  # G3
-    'h': 56,  # G#3
-    'n': 57,  # A3
-    'j': 58,  # A#3
-    'm': 59,  # B3
-    
-    # --------------------------------------------------
-    # Segunda Oitava (C4 - B4) - Teclas A a L
-    # --------------------------------------------------
-    'a': 60,  # C4
-    'w': 61,  # C#4
-    's': 62,  # D4
-    'e': 63,  # D#4
-    'd': 64,  # E4
-    'f': 65,  # F4
-    't': 66,  # F#4
-    'g': 67,  # G4
-    'y': 68,  # G#4
-    'h': 69,  # A4
-    'u': 70,  # A#4
-    'j': 71,  # B4
-    
-    # --------------------------------------------------
-    # Terceira Oitava (C5 - B5) - Teclas Q a P
-    # --------------------------------------------------
-    'q': 72,  # C5
-    '2': 73,  # C#5
-    'w': 74,  # D5
-    '3': 75,  # D#5
-    'e': 76,  # E5
-    'r': 77,  # F5
-    '5': 78,  # F#5
-    't': 79,  # G5
-    '6': 80,  # G#5
-    'y': 81,  # A5
-    '7': 82,  # A#5
-    'u': 83,  # B5,
-    
-    # --------------------------------------------------
-    # Teclas Adicionais (C6 - E6)
-    # --------------------------------------------------
-    'i': 84,  # C6
-    '9': 85,  # C#6
-    'o': 86,  # D6
-    '0': 87,  # D#6
-    'p': 88,   # E6
-    '1': 'octave_down',  # Diminui a oitava
-    '4': 'octave_up',     # Aumenta a oitava
-    'shift_l': 'sustained_mode'
+    'd': 51, 'g': 54, 'h': 56, 'j': 58,
+    # Segunda Oitava (C4-B4)
+    'a': 60, 'q': 61, 'w': 62, 'e': 63, 'r': 65, 't': 66, 'y': 67, 'u': 68,
+    # Terceira Oitava (C5-B5)
+    '1': 72, '2': 73, '3': 74, '4': 75, '5': 76, '6': 77, '7': 78
 }
         self.listener = None
 
@@ -86,19 +36,30 @@ class KeyboardMIDI:
     def on_press(self, key):
         try:
             if key.char == '1':
-                self.octave_offset -= 12  # Desce uma oitava
+                self.octave_offset = max(-48, self.octave_offset - 12)
+                return  # Impede processamento adicional
             elif key.char == '4':
-                self.octave_offset += 12  # Sobe uma oitava
-            else:
-                note = self.key_to_note[key.char] + self.octave_offset
-                self.synth._note_on(note, 0.7)
-        except:
+                self.octave_offset = min(48, self.octave_offset + 12)
+                return  # Impede processamento adicional
+            
+            note_info = self.key_to_note.get(key.char)
+            if isinstance(note_info, int):
+                note = note_info + self.octave_offset
+                if 0 <= note <= 127:
+                    self.master.after(0, lambda n=note: self.synth._note_on(n, 0.7))
+                       
+        except AttributeError:
             pass
-
+        
     def on_release(self, key):
         try:
-            self.synth._note_off(self.key_to_note[key.char])
-        except (KeyError, AttributeError):
+            if hasattr(key, 'char') and key.char in self.key_to_note:
+                note_info = self.key_to_note[key.char]
+                if isinstance(note_info, int):
+                    note = note_info + self.octave_offset
+                    if 0 <= note <= 127:  # Verifica limites MIDI
+                        self.synth._note_off(note)
+        except AttributeError:
             pass
 
 
@@ -110,16 +71,23 @@ class FullSynthInterface:
         
         self.config = SynthConfig()
         self.synth = MidiSynth(self.config)
+        
+        # CORREÇÃO APLICADA AQUI (única instância de KeyboardMIDI)
+        self.keyboard_midi = KeyboardMIDI(self.synth, self.master)  # Passa self.master
+        
         self.create_widgets()
         self.setup_bindings()
         self.current_waveform = self.config.default_waveform
         self.setup_visuals()
         self.synth.start()
-        #
-        # Funcionamento do MIDI Keyboard
-        self.keyboard_midi = KeyboardMIDI(self.synth)
+        
+        # REMOVIDA A LINHA REDUNDANTE ABAIXO:
+        # self.keyboard_midi = KeyboardMIDI(self.synth)  # (Esta linha foi excluída)
+        
         self.create_keyboard_help()
-        self.keyboard_midi.start()  # Inicia automaticamente
+        self.keyboard_midi.start()  # Inicia o teclado MIDI
+        # DEBUG: Tocar uma nota automaticamente (C4 = 60)
+        
 
     def create_keyboard_help(self):
         help_frame = ttk.LabelFrame(self.master, text="Teclado MIDI")
@@ -164,40 +132,58 @@ class FullSynthInterface:
         self.waveform = ttk.Combobox(parent, values=[w.value for w in WaveType])
         self.waveform.set(self.config.default_waveform.value)
         self.waveform.grid(row=0, column=1, padx=5, pady=5)
-        
+
         # Pulse Width
         self.pulse_frame = ttk.LabelFrame(parent, text="Pulse Width")
         ttk.Label(self.pulse_frame, text="Width:").grid(row=0, column=0)
-        self.pulse_scale = ttk.Scale(self.pulse_frame, from_=0.1, to=0.9, command=self.update_pulse)
-        self.pulse_scale.set(self.config.pulse_width)
-        self.pulse_scale.grid(row=0, column=1)
+        
+        # Cria o label primeiro
         self.pulse_label = ttk.Label(self.pulse_frame, text=f"{self.config.pulse_width:.2f}")
         self.pulse_label.grid(row=0, column=2)
+        
+        # Configura a escala após criar o label
+        self.pulse_scale = ttk.Scale(self.pulse_frame, from_=0.1, to=0.9)
+        self.pulse_scale.grid(row=0, column=1)
+        self.pulse_scale.config(command=self.update_pulse)  # Comando depois do label existir
+        self.pulse_scale.set(self.config.pulse_width)  # Valor inicial após configuração
+        
         self.pulse_frame.grid(row=1, column=0, padx=5, pady=5, sticky='w')
 
         # Super Saw
         self.super_saw_frame = ttk.LabelFrame(parent, text="Super Saw")
         ttk.Label(self.super_saw_frame, text="Voices:").grid(row=0, column=0)
-        self.ss_voices = ttk.Scale(self.super_saw_frame, from_=2, to=12, command=self.update_ss_voices)
-        self.ss_voices.set(self.config.super_saw_voices)
-        self.ss_voices.grid(row=0, column=1)
+        
+        # Cria o label primeiro
         self.ss_voices_label = ttk.Label(self.super_saw_frame, text=str(self.config.super_saw_voices))
         self.ss_voices_label.grid(row=0, column=2)
+        
+        # Configura a escala após criar o label
+        self.ss_voices = ttk.Scale(self.super_saw_frame, from_=2, to=12)
+        self.ss_voices.grid(row=0, column=1)
+        self.ss_voices.config(command=self.update_ss_voices)  # Comando depois do label existir
+        self.ss_voices.set(self.config.super_saw_voices)  # Valor inicial após configuração
+        
         self.super_saw_frame.grid(row=2, column=0, padx=5, pady=5, sticky='w')
 
         # Additive Synthesis
         self.additive_frame = ttk.LabelFrame(parent, text="Additive")
         ttk.Label(self.additive_frame, text="Harmonics:").grid(row=0, column=0)
-        self.additive_scale = ttk.Scale(self.additive_frame, from_=1, to=16, command=self.update_additive)
-        self.additive_scale.set(self.config.additive_harmonics)
-        self.additive_scale.grid(row=0, column=1)
+        
+        # Cria o label primeiro
         self.additive_label = ttk.Label(self.additive_frame, text=str(self.config.additive_harmonics))
         self.additive_label.grid(row=0, column=2)
+        
+        # Configura a escala após criar o label
+        self.additive_scale = ttk.Scale(self.additive_frame, from_=1, to=16)
+        self.additive_scale.grid(row=0, column=1)
+        self.additive_scale.config(command=self.update_additive)  # Comando depois do label existir
+        self.additive_scale.set(self.config.additive_harmonics)  # Valor inicial após configuração
+        
         self.additive_frame.grid(row=3, column=0, padx=5, pady=5, sticky='w')
 
-        # Noise Type
+        # Noise Type (não alterado - sem dependências de labels)
         self.noise_frame = ttk.LabelFrame(parent, text="Noise Type")
-        self.noise_type = ttk.Combobox(self.noise_frame, values=['white', 'pink', 'brown'])
+        self.noise_type = ttk.Combobox(self.noise_frame, values=['noise', 'pink_noise', 'brown_noise'])
         self.noise_type.set('white')
         self.noise_type.grid(row=0, column=0)
         self.noise_frame.grid(row=4, column=0, padx=5, pady=5, sticky='w')
@@ -205,20 +191,31 @@ class FullSynthInterface:
         self.update_waveform_visibility()
 
     def create_modulation_controls(self, parent):
-        # FM Modulation
+        # FM Frequency
         ttk.Label(parent, text="FM Frequency:").grid(row=0, column=0)
-        self.fm_freq = ttk.Scale(parent, from_=0.1, to=5000, command=self.update_fm_freq)
-        self.fm_freq.set(self.config.fm_mod_freq)
-        self.fm_freq.grid(row=0, column=1)
+        
+        # Cria o label primeiro
         self.fm_freq_label = ttk.Label(parent, text=f"{self.config.fm_mod_freq:.1f}")
         self.fm_freq_label.grid(row=0, column=2)
+        
+        # Configura a escala após o label
+        self.fm_freq = ttk.Scale(parent, from_=0.1, to=5000)
+        self.fm_freq.grid(row=0, column=1)
+        self.fm_freq.config(command=self.update_fm_freq)  # Comando após label existir
+        self.fm_freq.set(self.config.fm_mod_freq)
 
+        # FM Index
         ttk.Label(parent, text="FM Index:").grid(row=1, column=0)
-        self.fm_index = ttk.Scale(parent, from_=0, to=10, command=self.update_fm_index)
-        self.fm_index.set(self.config.fm_mod_index)
-        self.fm_index.grid(row=1, column=1)
+        
+        # Cria o label primeiro
         self.fm_index_label = ttk.Label(parent, text=f"{self.config.fm_mod_index:.2f}")
         self.fm_index_label.grid(row=1, column=2)
+        
+        # Configura a escala após o label
+        self.fm_index = ttk.Scale(parent, from_=0, to=10)
+        self.fm_index.grid(row=1, column=1)
+        self.fm_index.config(command=self.update_fm_index)  # Comando após label existir
+        self.fm_index.set(self.config.fm_mod_index)
 
     def create_envelope_controls(self, parent):
         # ADSR Controls
@@ -231,13 +228,17 @@ class FullSynthInterface:
         
         for i, (name, min_val, max_val, init_val) in enumerate(adsr_params):
             ttk.Label(parent, text=f"{name}:").grid(row=i, column=0)
-            scale = ttk.Scale(parent, from_=min_val, to=max_val, 
-                            command=lambda v, n=name: self.update_adsr(n, v))
-            scale.set(init_val)
-            scale.grid(row=i, column=1)
+            
+            # Cria o label primeiro
             label = ttk.Label(parent, text=f"{init_val:.2f}")
             label.grid(row=i, column=2)
-            setattr(self, f"{name.lower()}_label", label)
+            setattr(self, f"{name.lower()}_label", label)  # Garanta que o nome está correto
+            
+            # Configura a escala após o label
+            scale = ttk.Scale(parent, from_=min_val, to=max_val)
+            scale.grid(row=i, column=1)
+            scale.config(command=lambda v, n=name: self.update_adsr(n, v))
+            scale.set(init_val)  # Valor inicial após configuração
 
         # ADSR Curve Type
         ttk.Label(parent, text="Curve Type:").grid(row=4, column=0)
@@ -253,12 +254,17 @@ class FullSynthInterface:
         
         # Polyphony
         ttk.Label(parent, text="Max Polyphony:").grid(row=1, column=0)
-        self.polyphony = ttk.Scale(parent, from_=1, to=64, command=self.update_polyphony)
-        self.polyphony.set(self.config.max_polyphony)
-        self.polyphony.grid(row=1, column=1)
+
+        # Cria o label primeiro
         self.polyphony_label = ttk.Label(parent, text=str(self.config.max_polyphony))
         self.polyphony_label.grid(row=1, column=2)
-        
+
+        # Configura a escala após o label
+        self.polyphony = ttk.Scale(parent, from_=1, to=64)
+        self.polyphony.grid(row=1, column=1)
+        self.polyphony.config(command=self.update_polyphony)  # Configure o comando depois
+        self.polyphony.set(self.config.max_polyphony)
+                
         # Wavetable Loader
         ttk.Button(parent, text="Load Wavetable", command=self.load_wavetable).grid(row=2, column=0)
 
@@ -352,23 +358,36 @@ class FullSynthInterface:
         self.canvas.get_tk_widget().pack(side=tk.BOTTOM, fill=tk.BOTH, expand=True)
         self.update_visuals()
 
-    def update_visuals(self):
+    def update_visuals(self, force=False):
+        # Atualiza a waveform atual APÓS a renderização
+        if not force and self.current_waveform == self.config.default_waveform:
+            return  # Não faz nada se já estiver atualizado
+        
         try:
             t = np.linspace(0, 0.02, 1000)
-            phase = 2 * np.pi * 440 * t
             
-            # Generate wave sample based on current config
-            wave = self.synth._generate_voice_wave(VoiceState(frequency=440, velocity=1), t[:, None])
-
+            # Gera a onda com a configuração atual
+            wave = self.synth._generate_voice_wave(
+                VoiceState(frequency=440, velocity=1,phase=0.0), 
+                t[:, None]
+            )
+            
+            # Atualiza o gráfico
             self.ax.clear()
             self.ax.plot(t, wave)
             self.ax.set_title("Waveform Preview")
             self.ax.set_ylim(-1.1, 1.1)
             self.canvas.draw()
+            
+            # Atualiza a referência APÓS renderizar
+            self.current_waveform = self.config.default_waveform
+            
         except Exception as e:
             print(f"Visualization error: {e}")
+            
         finally:
-            self.master.after(100, self.update_visuals)
+            # Agenda próxima atualização sem forçar
+            self.master.after(100, lambda: self.update_visuals(force=False))
 
     def on_close(self):
         self.synth.stop()
