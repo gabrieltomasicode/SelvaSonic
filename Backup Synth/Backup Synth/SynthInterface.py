@@ -165,21 +165,6 @@ class FullSynthInterface:
         
         self.super_saw_frame.grid(row=2, column=0, padx=5, pady=5, sticky='w')
 
-        # Additive Synthesis
-        self.additive_frame = ttk.LabelFrame(parent, text="Additive")
-        ttk.Label(self.additive_frame, text="Harmonics:").grid(row=0, column=0)
-        
-        # Cria o label primeiro
-        self.additive_label = ttk.Label(self.additive_frame, text=str(self.config.additive_harmonics))
-        self.additive_label.grid(row=0, column=2)
-        
-        # Configura a escala após criar o label
-        self.additive_scale = ttk.Scale(self.additive_frame, from_=1, to=16)
-        self.additive_scale.grid(row=0, column=1)
-        self.additive_scale.config(command=self.update_additive)  # Comando depois do label existir
-        self.additive_scale.set(self.config.additive_harmonics)  # Valor inicial após configuração
-        
-        self.additive_frame.grid(row=3, column=0, padx=5, pady=5, sticky='w')
 
         # Noise Type (não alterado - sem dependências de labels)
         self.noise_frame = ttk.LabelFrame(parent, text="Noise Type")
@@ -216,6 +201,88 @@ class FullSynthInterface:
         self.fm_index.grid(row=1, column=1)
         self.fm_index.config(command=self.update_fm_index)  # Comando após label existir
         self.fm_index.set(self.config.fm_mod_index)
+
+        ttk.Label(parent, text="Additive Harmonics:").grid(row=2, column=0)
+    
+        self.additive_label = ttk.Label(parent, text=str(self.config.additive_harmonics))
+        self.additive_label.grid(row=2, column=2)
+        
+        self.additive_scale = ttk.Scale(parent, from_=1, to=16)
+        self.additive_scale.grid(row=2, column=1)
+        self.additive_scale.config(command=self.update_additive)
+        self.additive_scale.set(self.config.additive_harmonics)
+
+        # === LFO ===
+        ttk.Label(parent, text="LFO Freq:").grid(row=3, column=0)
+        self.lfo_freq_label = ttk.Label(parent, text=f"{self.config.lfo_freq:.2f} Hz")
+        self.lfo_freq_label.grid(row=3, column=2)
+
+        self.lfo_freq = ttk.Scale(parent, from_=0.1, to=20.0, command=self.update_lfo_freq)
+        self.lfo_freq.set(self.config.lfo_freq)
+        self.lfo_freq.grid(row=3, column=1)
+
+        ttk.Label(parent, text="LFO Depth:").grid(row=4, column=0)
+        self.lfo_depth_label = ttk.Label(parent, text=f"{self.config.lfo_depth:.2f}")
+        self.lfo_depth_label.grid(row=4, column=2)
+
+        self.lfo_depth = ttk.Scale(parent, from_=0.0, to=1.0, command=self.update_lfo_depth)
+        self.lfo_depth.set(self.config.lfo_depth)
+        self.lfo_depth.grid(row=4, column=1)
+
+        ttk.Label(parent, text="LFO Target:").grid(row=5, column=0)
+        self.lfo_target = ttk.Combobox(parent, values=["pitch", "pulse"])
+        self.lfo_target.set(self.config.lfo_target)
+        self.lfo_target.grid(row=5, column=1)
+        self.lfo_target.bind('<<ComboboxSelected>>', self.update_lfo_target)
+
+        # === HFO ===
+        ttk.Label(parent, text="HFO Freq:").grid(row=6, column=0)
+        self.hfo_freq_label = ttk.Label(parent, text=f"{self.config.hfo_freq:.1f} Hz")
+        self.hfo_freq_label.grid(row=6, column=2)
+
+        self.hfo_freq = ttk.Scale(parent, from_=20, to=8000, command=self.update_hfo_freq)
+        self.hfo_freq.set(self.config.hfo_freq)
+        self.hfo_freq.grid(row=6, column=1)
+
+        ttk.Label(parent, text="HFO Depth:").grid(row=7, column=0)
+        self.hfo_depth_label = ttk.Label(parent, text=f"{self.config.hfo_depth:.2f}")
+        self.hfo_depth_label.grid(row=7, column=2)
+
+        self.hfo_depth = ttk.Scale(parent, from_=0.0, to=1.0, command=self.update_hfo_depth)
+        self.hfo_depth.set(self.config.hfo_depth)
+        self.hfo_depth.grid(row=7, column=1)
+
+        ttk.Label(parent, text="HFO Target:").grid(row=8, column=0)
+        self.hfo_target = ttk.Combobox(parent, values=["pitch"])
+        self.hfo_target.set(self.config.hfo_target)
+        self.hfo_target.grid(row=8, column=1)
+        self.hfo_target.bind('<<ComboboxSelected>>', self.update_hfo_target)
+
+        # === FILTER ===
+        filter_frame = ttk.LabelFrame(parent, text="Filter")
+        filter_frame.grid(row=9, column=0, columnspan=3, pady=10, sticky='ew')
+
+        ttk.Label(filter_frame, text="Type:").grid(row=0, column=0)
+        self.filter_type = ttk.Combobox(filter_frame, values=["lowpass", "highpass", "bandpass"])
+        self.filter_type.set(self.config.filter_type)
+        self.filter_type.grid(row=0, column=1)
+        self.filter_type.bind("<<ComboboxSelected>>", self.update_filter_type)
+
+        ttk.Label(filter_frame, text="Cutoff (Hz):").grid(row=1, column=0)
+        self.filter_freq_label = ttk.Label(filter_frame, text=f"{self.config.filter_freq:.0f}")
+        self.filter_freq_label.grid(row=1, column=2)
+
+        self.filter_freq = ttk.Scale(filter_frame, from_=20, to=20000, command=self.update_filter_freq)
+        self.filter_freq.set(self.config.filter_freq)
+        self.filter_freq.grid(row=1, column=1)
+
+        ttk.Label(filter_frame, text="Q:").grid(row=2, column=0)
+        self.filter_q_label = ttk.Label(filter_frame, text=f"{self.config.filter_q:.2f}")
+        self.filter_q_label.grid(row=2, column=2)
+
+        self.filter_q = ttk.Scale(filter_frame, from_=0.1, to=10.0, command=self.update_filter_q)
+        self.filter_q.set(self.config.filter_q)
+        self.filter_q.grid(row=2, column=1)
 
     def create_envelope_controls(self, parent):
         # ADSR Controls
@@ -254,6 +321,20 @@ class FullSynthInterface:
         
         # Polyphony
         ttk.Label(parent, text="Max Polyphony:").grid(row=1, column=0)
+        
+        # Qualidade de Áudio
+        ttk.Label(parent, text="Sample Rate (Hz):").grid(row=3, column=0)
+        self.sample_rate = ttk.Combobox(parent, values=[22050, 32000, 44100, 48000, 96000])
+        self.sample_rate.set(self.config.sample_rate)
+        self.sample_rate.grid(row=3, column=1)
+        self.sample_rate.bind('<<ComboboxSelected>>', self.update_sample_rate)
+
+        ttk.Label(parent, text="Buffer Size:").grid(row=4, column=0)
+        self.buffer_size = ttk.Combobox(parent, values=[32, 64, 128, 256, 512])
+        self.buffer_size.set(self.config.buffer_size)
+        self.buffer_size.grid(row=4, column=1)
+        self.buffer_size.bind('<<ComboboxSelected>>', self.update_buffer_size)
+
 
         # Cria o label primeiro
         self.polyphony_label = ttk.Label(parent, text=str(self.config.max_polyphony))
@@ -269,6 +350,11 @@ class FullSynthInterface:
         ttk.Button(parent, text="Load Wavetable", command=self.load_wavetable).grid(row=2, column=0)
 
     def setup_bindings(self):
+
+
+
+
+
         self.waveform.bind('<<ComboboxSelected>>', self.on_waveform_change)
         self.adsr_curve.bind('<<ComboboxSelected>>', self.update_adsr_curve)
         self.master.protocol("WM_DELETE_WINDOW", self.on_close)
@@ -278,15 +364,13 @@ class FullSynthInterface:
         visibility = {
             WaveType.PULSE: [self.pulse_frame],
             WaveType.SUPER_SAW: [self.super_saw_frame],
-            WaveType.ADDITIVE: [self.additive_frame],
             WaveType.NOISE: [self.noise_frame],
             WaveType.PINK_NOISE: [self.noise_frame],
             WaveType.BROWN_NOISE: [self.noise_frame]
         }
         
         # Hide all first
-        for f in [self.pulse_frame, self.super_saw_frame, 
-                self.additive_frame, self.noise_frame]:
+        for f in [self.pulse_frame, self.super_saw_frame, self.noise_frame]:
             f.grid_remove()
         
         # Show relevant frames
@@ -339,9 +423,45 @@ class FullSynthInterface:
     def update_polyphony(self, value):
         self.config.max_polyphony = int(float(value))
         self.polyphony_label.config(text=str(self.config.max_polyphony))
-        
-        while len(self.synth.voices) > self.config.max_polyphony:
-            self.synth._remove_oldest_voice()
+    
+    def update_lfo_freq(self, value):
+        val = float(value)
+        self.config.lfo_freq = val
+        self.lfo_freq_label.config(text=f"{val:.2f} Hz")
+
+    def update_lfo_depth(self, value):
+        val = float(value)
+        self.config.lfo_depth = val
+        self.lfo_depth_label.config(text=f"{val:.2f}")
+
+    def update_lfo_target(self, event):
+        self.config.lfo_target = self.lfo_target.get()
+
+    def update_hfo_freq(self, value):
+        val = float(value)
+        self.config.hfo_freq = val
+        self.hfo_freq_label.config(text=f"{val:.1f} Hz")
+
+    def update_hfo_depth(self, value):
+        val = float(value)
+        self.config.hfo_depth = val
+        self.hfo_depth_label.config(text=f"{val:.2f}")
+
+    def update_hfo_target(self, event):
+        self.config.hfo_target = self.hfo_target.get()
+
+    def update_filter_type(self, event):
+        self.config.filter_type = self.filter_type.get()
+
+    def update_filter_freq(self, value):
+        val = float(value)
+        self.config.filter_freq = val
+        self.filter_freq_label.config(text=f"{val:.0f}")
+
+    def update_filter_q(self, value):
+        val = float(value)
+        self.config.filter_q = val
+        self.filter_q_label.config(text=f"{val:.2f}")
 
     def load_wavetable(self):
         file_path = filedialog.askopenfilename(filetypes=[("WAV Files", "*.wav")])
@@ -351,43 +471,86 @@ class FullSynthInterface:
                 self.config.wavetable = data
             except Exception as e:
                 print(f"Error loading wavetable: {e}")
+    def update_sample_rate(self, event):
+        try:
+            new_rate = int(self.sample_rate.get())
+            self.config.sample_rate = new_rate
+            self.restart_audio_stream()
+        except Exception as e:
+            print(f"Erro ao atualizar sample rate: {e}")
+
+    def update_buffer_size(self, event):
+        try:
+            new_size = int(self.buffer_size.get())
+            self.config.buffer_size = new_size
+            self.restart_audio_stream()
+        except Exception as e:
+            print(f"Erro ao atualizar buffer size: {e}")
+
+    def restart_audio_stream(self):
+        try:
+            print("Reiniciando stream de áudio com nova configuração...")
+            self.synth.stop()
+            self.synth = MidiSynth(self.config)
+            self.synth.start()
+        except Exception as e:
+            print(f"Erro ao reiniciar stream de áudio: {e}")
 
     def setup_visuals(self):
         self.fig, self.ax = plt.subplots(figsize=(8, 3))
         self.canvas = FigureCanvasTkAgg(self.fig, master=self.master)
         self.canvas.get_tk_widget().pack(side=tk.BOTTOM, fill=tk.BOTH, expand=True)
+
+        # Botão para pausar/retomar visualização
+        self.visual_paused = False
+        self.pause_button = ttk.Button(self.master, text="⏸ Pausar Visualização", command=self.toggle_visual)
+        self.pause_button.pack()
+
         self.update_visuals()
+    
+    def toggle_visual(self):
+        self.visual_paused = not self.visual_paused
+        new_text = "▶ Retomar Visualização" if self.visual_paused else "⏸ Pausar Visualização"
+        self.pause_button.config(text=new_text)
+
 
     def update_visuals(self, force=False):
-        # Atualiza a waveform atual APÓS a renderização
-        if not force and self.current_waveform == self.config.default_waveform:
-            return  # Não faz nada se já estiver atualizado
-        
-        try:
-            t = np.linspace(0, 0.02, 1000)
-            
-            # Gera a onda com a configuração atual
-            wave = self.synth._generate_voice_wave(
-                VoiceState(frequency=440, velocity=1,phase=0.0), 
-                t[:, None]
-            )
-            
-            # Atualiza o gráfico
+        if self.visual_paused:
+            self.master.after(200, self.update_visuals)
+            return
+
+        # Só atualiza se houver vozes ativas
+        if not self.synth.voices:
             self.ax.clear()
-            self.ax.plot(t, wave)
-            self.ax.set_title("Waveform Preview")
-            self.ax.set_ylim(-1.1, 1.1)
+            self.ax.set_title("Waveform Preview (Nenhuma nota ativa)")
             self.canvas.draw()
-            
-            # Atualiza a referência APÓS renderizar
-            self.current_waveform = self.config.default_waveform
-            
+            self.master.after(200, self.update_visuals)
+            return
+
+        try:
+            t = np.linspace(0, 0.03, 1000)  # tempo de 30ms
+            mix = np.zeros_like(t)
+
+            with self.synth.voices_lock:
+                for voice in self.synth.voices.values():
+                    wave = self.synth._generate_voice_wave(voice, t[:, None])
+                    adsr = self.synth._calculate_adsr(voice)
+                    mix += wave * adsr * voice.velocity
+
+            # Normalize (evita clipping no gráfico)
+            mix = np.clip(mix, -1.0, 1.0)
+
+            self.ax.clear()
+            self.ax.plot(t, mix)
+            self.ax.set_ylim(-1.1, 1.1)
+            self.ax.set_title("Waveform Preview (ao vivo)")
+            self.canvas.draw()
+
         except Exception as e:
-            print(f"Visualization error: {e}")
-            
-        finally:
-            # Agenda próxima atualização sem forçar
-            self.master.after(100, lambda: self.update_visuals(force=False))
+            print(f"Erro na visualização: {e}")
+
+        self.master.after(100, self.update_visuals)
+
 
     def on_close(self):
         self.synth.stop()

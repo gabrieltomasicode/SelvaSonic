@@ -77,6 +77,15 @@ class SynthConfig:
     adsr_curve: ADSRCurve = ADSRCurve.LINEAR
     additive_harmonics: int = 8  # Número de harmônicos para síntese aditiva
     super_saw_voices: int = 7    # Número de vozes para Super Saw
+    lfo_freq: float = 5.0
+    lfo_depth: float = 0.0
+    lfo_target: str = "pitch"  # ou "pulse", "volume", etc.
+    hfo_freq: float = 200.0
+    hfo_depth: float = 0.0
+    hfo_target: str = "pitch"
+    filter_type: str = "lowpass"   # 'lowpass', 'highpass', 'bandpass'
+    filter_freq: float = 1000.0
+    filter_q: float = 0.707
 
 @dataclass
 class VoiceState:
@@ -108,6 +117,11 @@ def validate_positive(func: Callable) -> Callable:
                 raise ValueError(f"Valor negativo não permitido para {name}: {value}")
         return func(self, *args, **kwargs)
     return wrapper
+
+def exp_curve(x: float, factor: float = 4.0) -> float:
+    """Curva exponencial suave para envelope ADSR"""
+    return 1 - np.exp(-factor * x)
+
 
 # ==================== CLASSE PRINCIPAL ====================
 class MidiSynth:
@@ -262,11 +276,29 @@ class MidiSynth:
             raise
 
     def _generate_voice_wave(self, voice: VoiceState, t: np.ndarray) -> np.ndarray:
-        # Calcula a fase incremental
-        phase_increment = 2 * np.pi * voice.frequency * (t[:,0] - t[0,0])
-        voice.phase += phase_increment[-1]  # Atualiza a fase final para próxima callback
-        carrier_phase = voice.phase - phase_increment[::-1]  # Corrige a direção
-        
+            # Calcula a frequência com LFO e HFO (como já tínhamos configurado)
+        t_diff = (t[:, 0] - t[0, 0])
+        base_freq = voice.frequency
+
+        # LFO
+        if self.config.lfo_depth > 0.0:
+            lfo_wave = np.sin(2 * np.pi * self.config.lfo_freq * t[:, 0])
+            if self.config.lfo_target == "pitch":
+                base_freq *= (1 + self.config.lfo_depth * lfo_wave)
+
+        # HFO
+        if self.config.hfo_depth > 0.0:
+            hfo_wave = np.sin(2 * np.pi * self.config.hfo_freq * t[:, 0])
+            if self.config.hfo_target == "pitch":
+                base_freq *= (1 + self.config.hfo_depth * hfo_wave)
+
+        # Fase
+        phase_increment = 2 * np.pi * base_freq * t_diff
+        voice.phase += phase_increment[-1]
+        carrier_phase = voice.phase - phase_increment[::-1]
+        phase = carrier_phase  # ✅ Isto resolve o erro: sempre define phase
+
+                
         # Aplicar modulação FM se habilitada
         if self.config.fm_mod_index > 0:
             modulator = self.config.fm_mod_index * np.sin(2 * np.pi * self.config.fm_mod_freq * t[:,0])
@@ -316,6 +348,14 @@ class MidiSynth:
                     saws.append(saw)
                 
                 wave = np.mean(saws, axis=0)
+
+                if self.config.additive_harmonics > 1:
+                    harmonics = self.config.additive_harmonics
+                    amps = [1/(i+1) for i in range(harmonics)]
+                    waves = [amps[i] * np.sin((i+1)*phase) for i in range(harmonics)]
+                    wave = np.sum(waves, axis=0)
+                
+                    return wave.astype(np.float32)
                 
                 # Atualiza a fase principal APENAS uma vez (evita acumulação múltipla)
                 voice.phase += 2 * np.pi * voice.frequency * (t[-1,0] - t[0,0])
@@ -349,7 +389,29 @@ class MidiSynth:
                 
             case _:
                 raise ValueError(f"Tipo de onda não suportado: {self.config.default_waveform}")
-        
+            # Aplicação de filtro se necessário
+            
+        nyquist = 0.5 * self.config.sample_rate
+        norm_freq = self.config.filter_freq / nyquist
+
+        try:
+            if self.config.filter_type == "lowpass":
+                b, a = butter(N=2, Wn=norm_freq, btype='low')
+            elif self.config.filter_type == "highpass":
+                b, a = butter(N=2, Wn=norm_freq, btype='high')
+            elif self.config.filter_type == "bandpass":
+                bandwidth = self.config.filter_freq / self.config.filter_q
+                low = (self.config.filter_freq - bandwidth / 2) / nyquist
+                high = (self.config.filter_freq + bandwidth / 2) / nyquist
+                b, a = butter(N=2, Wn=[low, high], btype='band')
+            else:
+                b, a = None, None
+
+            if b is not None and a is not None:
+                wave = lfilter(b, a, wave)
+
+        except Exception as e:
+            print(f"Erro no filtro: {e}")
         return wave.astype(np.float32)
 
     # ==================== ENVELOPE ADSR ====================
@@ -381,7 +443,8 @@ class MidiSynth:
 
             # Aplicação da curva
             if self.config.adsr_curve == ADSRCurve.EXPONENTIAL:
-                adsr **= 1.5  # Suavização exponencial
+                adsr = exp_curve(adsr, factor=4.0)
+
 
             # Garantia de valores válidos
             adsr = np.clip(adsr, 0.0, 1.0).item()
@@ -393,8 +456,25 @@ class MidiSynth:
                     f"Estado: {'Ativo' if voice.active else 'Release'} | " +
                     f"Freq: {voice.frequency:.1f} Hz"
                 )
+            # Se envelope estiver abaixo do limiar prático, corte a nota
+            if adsr < 0.001:
+                voice.active = False  # Garante que será removida na próxima rodada
+                adsr = 0.0
+
+            adsr = float(np.clip(adsr, 0.0, 1.0))
+            if np.isnan(adsr) or np.isinf(adsr):
+                adsr = 0.0
+            
+            # Segurança contra valores inválidos ou baixos demais
+            if np.isnan(adsr) or np.isinf(adsr):
+                adsr = 0.0
+
+            if adsr < 0.001:
+                voice.active = False
+                adsr = 0.0
 
             return adsr
+        
 
         except Exception as e:
             print(f"⛔ ERRO NO ADSR: {str(e)}")
