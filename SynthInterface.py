@@ -8,7 +8,6 @@ import matplotlib.pyplot as plt
 from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg
 import soundfile as sf
 from pynput import keyboard  
-from scipy.signal import butter, lfilter
 
 class KeyboardMIDI:
     def __init__(self, synth, master):
@@ -382,12 +381,9 @@ class FullSynthInterface:
         new_wave = WaveType(self.waveform.get())
         self.config.default_waveform = new_wave
         
+        # Handle noise type selection
         if new_wave in [WaveType.NOISE, WaveType.PINK_NOISE, WaveType.BROWN_NOISE]:
-            selected_noise = self.noise_type.get()
-            try:
-                self.config.default_waveform = WaveType(selected_noise)
-            except ValueError:
-                self.config.default_waveform = WaveType.NOISE
+            self.config.default_waveform = WaveType(self.noise_type.get())
         
         self.update_waveform_visibility()
 
@@ -523,15 +519,10 @@ class FullSynthInterface:
             self.master.after(200, self.update_visuals)
             return
 
-        t = np.linspace(0, 0.03, 1000)
-        
+        # Só atualiza se houver vozes ativas
         if not self.synth.voices:
-            # Gerar preview estático
-            phase = 2 * np.pi * 440 * t
-            wave = self._generate_static_wave(phase)
             self.ax.clear()
-            self.ax.plot(t, wave)
-            self.ax.set_title("Waveform Preview (Modo Estático)")
+            self.ax.set_title("Waveform Preview (Nenhuma nota ativa)")
             self.canvas.draw()
             self.master.after(200, self.update_visuals)
             return
@@ -560,72 +551,6 @@ class FullSynthInterface:
 
         self.master.after(100, self.update_visuals)
 
-    def _generate_static_wave(self, phase):
-        """Gera uma prévia estática da forma de onda selecionada"""
-        config = self.config
-        try:
-            match config.default_waveform:
-                case WaveType.SINE:
-                    return np.sin(phase)
-                    
-                case WaveType.SQUARE:
-                    return np.sign(np.sin(phase))
-                    
-                case WaveType.TRIANGLE:
-                    return (2 * np.arcsin(np.sin(phase)) / np.pi)
-                    
-                case WaveType.SAWTOOTH:
-                    return ((phase % (2*np.pi)) / np.pi - 1)
-                    
-                case WaveType.NOISE:
-                    return np.random.uniform(-1, 1, phase.shape)
-                    
-                case WaveType.PULSE:
-                    pulse_width = config.pulse_width
-                    return np.where(
-                        (phase % (2*np.pi)) < (2*np.pi * pulse_width), 
-                        1.0, -1.0
-                    )
-                    
-                case WaveType.SUPER_SAW:
-                    # Versão simplificada para preview
-                    detune = 0.2
-                    voices = [
-                        ((phase * (1 + detune * i)) % (2*np.pi) / np.pi - 1)
-                        for i in np.linspace(-0.5, 0.5, 7)
-                    ]
-                    return np.mean(voices, axis=0)
-                    
-                case WaveType.WAVETABLE:
-                    if config.wavetable is not None:
-                        wt_size = len(config.wavetable)
-                        position = (phase % (2*np.pi)) / (2*np.pi) * wt_size
-                        return np.interp(position, np.arange(wt_size), config.wavetable)
-                    return np.zeros_like(phase)
-                    
-                case WaveType.PINK_NOISE:
-                    white = np.random.uniform(-1, 1, phase.shape)
-                    b = [0.049922035, -0.095993537, 0.050612699, -0.004408786]
-                    a = [1, -2.494956002, 2.017265875, -0.522189400]
-                    return lfilter(b, a, white)
-                    
-                case WaveType.BROWN_NOISE:
-                    white = np.random.uniform(-1, 1, phase.shape)
-                    brown = np.cumsum(white) * 0.02
-                    return np.clip(brown - np.mean(brown), -1, 1)
-                    
-                case WaveType.ADDITIVE:
-                    harmonics = config.additive_harmonics
-                    amps = [1/(i+1) for i in range(harmonics)]
-                    waves = [amps[i] * np.sin((i+1)*phase) for i in range(harmonics)]
-                    return np.sum(waves, axis=0)
-                    
-                case _:
-                    return np.zeros_like(phase)
-                    
-        except Exception as e:
-            print(f"Erro na geração estática: {e}")
-            return np.zeros_like(phase)
 
     def on_close(self):
         self.synth.stop()

@@ -393,7 +393,7 @@ class MidiSynth:
             
         nyquist = 0.5 * self.config.sample_rate
         norm_freq = self.config.filter_freq / nyquist
-        
+
         try:
             if self.config.filter_type == "lowpass":
                 b, a = butter(N=2, Wn=norm_freq, btype='low')
@@ -401,8 +401,8 @@ class MidiSynth:
                 b, a = butter(N=2, Wn=norm_freq, btype='high')
             elif self.config.filter_type == "bandpass":
                 bandwidth = self.config.filter_freq / self.config.filter_q
-                low = (self.config.filter_freq - bandwidth/2) / nyquist
-                high = (self.config.filter_freq + bandwidth/2) / nyquist
+                low = (self.config.filter_freq - bandwidth / 2) / nyquist
+                high = (self.config.filter_freq + bandwidth / 2) / nyquist
                 b, a = butter(N=2, Wn=[low, high], btype='band')
             else:
                 b, a = None, None
