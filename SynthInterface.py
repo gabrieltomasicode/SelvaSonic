@@ -47,6 +47,7 @@ class KeyboardMIDI:
         )
         self.listener.start()
 
+
     def on_press(self, key):
         """
         Processa eventos de pressionamento de teclas.
@@ -66,7 +67,12 @@ class KeyboardMIDI:
             if isinstance(note_info, int):
                 note = note_info + self.octave_offset
                 if 0 <= note <= 127:
-                    self.master.after(0, lambda n=note: self.synth._note_on(n, 0.7))
+                    def safe_note_on(n):
+                        try:
+                            self.synth._note_on(n, 0.7)
+                        except Exception as e:
+                            print(f"Erro ao tocar nota {n}: {e}")
+                    self.master.after(0, lambda n=note: safe_note_on(n))    
                        
         except AttributeError:
             pass
@@ -247,7 +253,6 @@ class FullSynthInterface:
         self.ss_voices.set(self.config.super_saw_voices)  # Valor inicial após configuração
         
         self.super_saw_frame.grid(row=2, column=0, padx=5, pady=5, sticky='w')
-
 
         # Noise Type (não alterado - sem dependências de labels)
         self.noise_frame = ttk.LabelFrame(parent, text="Noise Type")
@@ -709,7 +714,10 @@ class FullSynthInterface:
         if file_path:
             try:
                 data, _ = sf.read(file_path)
+                if data is None or len(data) == 0:
+                    raise ValueError("⚠️ Arquivo WAV inválido ou vazio.")
                 self.config.wavetable = data
+
             except Exception as e:
                 print(f"Error loading wavetable: {e}")
     def update_sample_rate(self, event):
@@ -883,12 +891,6 @@ class FullSynthInterface:
                     white = np.random.uniform(-1, 1, phase.shape)
                     brown = np.cumsum(white) * 0.02
                     return np.clip(brown - np.mean(brown), -1, 1)
-                    
-                case WaveType.ADDITIVE:
-                    harmonics = config.additive_harmonics
-                    amps = [1/(i+1) for i in range(harmonics)]
-                    waves = [amps[i] * np.sin((i+1)*phase) for i in range(harmonics)]
-                    return np.sum(waves, axis=0)
                     
                 case _:
                     return np.zeros_like(phase)

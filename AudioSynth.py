@@ -232,6 +232,14 @@ class MidiSynth:
         Raises:
             Exception: Em caso de falha na configuração do áudio.
         """
+        devices = sd.query_devices()
+        if not devices:
+            raise RuntimeError("⛔ Nenhum dispositivo de áudio disponível!")
+
+        print("Dispositivos disponíveis:")
+        
+        for i, d in enumerate(devices):
+            print(f"  [{i}] {d['name']} ({d['max_output_channels']} canais)")
         try:
             print("=== Configuração de Áudio ===")
             print(f"Dispositivos disponíveis:\n{sd.query_devices()}\n")
@@ -509,12 +517,6 @@ class MidiSynth:
                 wave -= np.mean(wave)  # Centralizar
                 wave = np.clip(wave, -1, 1)  # Evitar clipping
                 
-            case WaveType.ADDITIVE:
-                harmonics = self.config.additive_harmonics
-                amps = [1/(i+1) for i in range(harmonics)]
-                waves = [amps[i] * np.sin((i+1)*phase) for i in range(harmonics)]
-                wave = np.sum(waves, axis=0)
-                
             case _:
                 raise ValueError(f"Tipo de onda não suportado: {self.config.default_waveform}")
             # Aplicação de filtro se necessário
@@ -667,12 +669,16 @@ class MidiSynth:
         Inicia a reprodução de áudio e o processamento MIDI.
         """
         self._stream = sd.OutputStream(
-            callback=self._audio_callback,
-            samplerate=self.config.sample_rate,
-            blocksize=self.config.buffer_size,
-            channels=2
+        callback=self._audio_callback,
+        samplerate=self.config.sample_rate,
+        blocksize=self.config.buffer_size,
+        channels=2
         )
-        self._stream.start()
+        try:
+            self._stream.start()
+            print("✅ Áudio iniciado com sucesso.")
+        except Exception as e:
+            print(f"⛔ ERRO ao iniciar áudio: {e}")
 
     def stop(self) -> None:
         """
