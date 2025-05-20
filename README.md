@@ -49,7 +49,7 @@ python SynthInterface.py
 Backup Synth/
 ├── AudioSynth.py          # Núcleo do sintetizador
 ├── SynthInterface.py      # Interface gráfica + controle
-├── ReadMe.txt             # Documentação antiga
+├── README.md              # Documentação 
 ├── Documentação/          # Diagramas e documentação técnica
 ```
 
