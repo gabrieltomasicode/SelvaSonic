@@ -1,17 +1,23 @@
 """
-Sistema de síntese de áudio MIDI profissional com suporte a múltiplos tipos de onda
-e gestão de polifonia avançada.
+SelvaSonic AudioSynth
 
-Características principais:
-- Síntese de 11 tipos de onda diferentes
-- Integração MIDI completa
-- Gestão de vozes com priorização inteligente
-- Geração de áudio em tempo real de baixa latência
-- Arquitetura modular e extensível
+Sistema profissional de síntese de áudio MIDI em Python, projetado para aplicações musicais, experimentação sonora e integração com controladores MIDI.
+
+Principais recursos:
+- Suporte a 11 tipos de onda, incluindo Super Saw, Pulse, Noise, Pink/Brown Noise e Wavetable.
+- Gestão avançada de polifonia com priorização e remoção automática de vozes antigas.
+- Envelope ADSR configurável com curvas linear ou exponencial.
+- Modulação FM, LFO e HFO com roteamento flexível (pitch, pulse, volume, etc).
+- Filtros digitais (lowpass, highpass, bandpass) configuráveis em tempo real.
+- Integração MIDI completa (note on/off, pitch bend, control change).
+- Geração de áudio em tempo real com baixa latência usando sounddevice.
+- Arquitetura modular, extensível e orientada a objetos.
+- Suporte a síntese aditiva e wavetable customizada.
+- Pronto para uso em aplicações interativas, como engine de áudio.
 
 Autor: Gabriel Tomasi
-Versão: 1.0.0
-Data: 04/04/2025
+Versão: 2.1.1
+Data: 20/05/2025
 """
 
 import mido
@@ -25,9 +31,23 @@ from enum import Enum
 from scipy.signal import butter, lfilter, firwin
 from threading import Lock
 
-# ==================== ENUMS E ESTRUTURAS ====================
+# ==================== ENUMS E ESTRUTURAS ====================================================================================================
 class WaveType(Enum):
-    """Tipos de onda disponíveis para síntese"""
+    """
+    Tipos de onda disponíveis para síntese.
+
+    Valores:
+        SINE: Onda senoidal clássica.
+        SQUARE: Onda quadrada com duty cycle ajustável.
+        TRIANGLE: Onda triangular simétrica.
+        SAWTOOTH: Dente de serra ascendente.
+        NOISE: Ruído branco não filtrado.
+        PULSE: Onda pulsada com largura ajustável.
+        SUPER_SAW: Múltiplas dentes de serra com detune.
+        WAVETABLE: Síntese por tabela de onda.
+        PINK_NOISE: Ruído com equalização 1/f.
+        BROWN_NOISE: Ruído com equalização 1/f².
+    """
     SINE = 'sine'          # Onda senoidal clássica
     SQUARE = 'square'      # Onda quadrada com duty cycle ajustável
     TRIANGLE = 'triangle'  # Onda triangular simétrica
@@ -38,28 +58,50 @@ class WaveType(Enum):
     WAVETABLE = 'wavetable'# Síntese por tabela de onda
     PINK_NOISE = 'pink_noise' # Ruído com equalização 1/f
     BROWN_NOISE = 'brown_noise' # Ruído com equalização 1/f²
-    ADDITIVE = 'additive'  # Síntese aditiva com harmônicos
+    
 
 class ADSRCurve(Enum):
-    """Tipos de curva para o envelope ADSR"""
-    LINEAR = 'linear'      # Curva linear de interpolação
-    EXPONENTIAL = 'exponential'    # Curva exponencial suave
+    """
+    Enumeração dos tipos de curva para o envelope ADSR.
+
+    Valores:
+        LINEAR: Curva linear de interpolação.
+        EXPONENTIAL: Curva exponencial suave.
+    """
+    LINEAR = 'linear'      
+    EXPONENTIAL = 'exponential'    
 
 @dataclass
 class SynthConfig:
     """
-    Configurações globais do sintetizador
-    
-    Parâmetros:
-    - sample_rate: Taxa de amostragem em Hz (padrão: 44100)
-    - buffer_size: Tamanho do buffer de áudio (potências de 2 recomendadas)
-    - max_polyphony: Número máximo de vozes simultâneas
-    - midi_port: Nome do dispositivo MIDI de entrada (opcional)
-    - default_waveform: Tipo de onda padrão
-    - fm_mod_freq: Frequência do modulador FM em Hz
-    - fm_mod_index: Índice de modulação FM
-    - pulse_width: Largura do pulso (0.1-0.9)
-    - wavetable: Tabela de onda personalizada (numpy array)
+    Configurações globais do sintetizador.
+
+    Atributos:
+        sample_rate (int): Taxa de amostragem em Hz.
+        buffer_size (int): Tamanho do buffer de áudio.
+        max_polyphony (int): Número máximo de vozes simultâneas.
+        midi_port (Optional[str]): Nome do dispositivo MIDI de entrada.
+        default_waveform (WaveType): Tipo de onda padrão.
+        fm_mod_freq (float): Frequência do modulador FM em Hz.
+        fm_mod_index (float): Índice de modulação FM.
+        pulse_width (float): Largura do pulso (0.1-0.9).
+        wavetable (np.ndarray): Tabela de onda personalizada.
+        attack_time (float): Tempo de ataque do envelope.
+        decay_time (float): Tempo de decaimento do envelope.
+        sustain_level (float): Nível de sustentação do envelope.
+        release_time (float): Tempo de release do envelope.
+        adsr_curve (ADSRCurve): Tipo de curva do envelope.
+        additive_harmonics (int): Número de harmônicos para síntese aditiva.
+        super_saw_voices (int): Número de vozes para Super Saw.
+        lfo_freq (float): Frequência do LFO.
+        lfo_depth (float): Profundidade do LFO.
+        lfo_target (str): Parâmetro alvo do LFO.
+        hfo_freq (float): Frequência do HFO.
+        hfo_depth (float): Profundidade do HFO.
+        hfo_target (str): Parâmetro alvo do HFO.
+        filter_type (str): Tipo de filtro ('lowpass', 'highpass', 'bandpass').
+        filter_freq (float): Frequência de corte do filtro.
+        filter_q (float): Q do filtro.
     """
     sample_rate: int = 44100
     buffer_size: int = 64
@@ -87,17 +129,33 @@ class SynthConfig:
     filter_freq: float = 1000.0
     filter_q: float = 0.707
 
+    def validate(self):
+        """
+        Valida os parâmetros da configuração do sintetizador.
+
+        Raises:
+            ValueError: Se algum parâmetro for inválido.
+        """
+        if self.sample_rate <= 0:
+            raise ValueError("Sample rate deve ser maior que 0.")
+        if self.buffer_size <= 0:
+            raise ValueError("Buffer size deve ser maior que 0.")
+        if self.max_polyphony <= 0:
+            raise ValueError("Max polyphony deve ser maior que 0.")
+
 @dataclass
 class VoiceState:
     """
-    Estado de uma voz ativa no sintetizador
-    
-    Campos:
-    - frequency: Frequência atual da nota em Hz
-    - velocity: Velocidade da nota (0.0-1.0)
-    - age: Tempo desde o início da nota em segundos
-    - envelope: Valor atual do envelope (0.0-1.0)
-    - active: Flag indicando se a nota está ativa
+    Estado de uma voz ativa no sintetizador.
+
+    Atributos:
+        frequency (float): Frequência atual da nota em Hz.
+        velocity (float): Velocidade da nota (0.0-1.0).
+        age (float): Tempo desde o início da nota em segundos.
+        envelope (float): Valor atual do envelope (0.0-1.0).
+        active (bool): Flag indicando se a nota está ativa.
+        release_start_time (Optional[float]): Momento de início do release.
+        phase (float): Fase atual da onda.
     """
     frequency: float
     velocity: float
@@ -107,9 +165,17 @@ class VoiceState:
     release_start_time: Optional[float] = None  
     phase: float = 0.0
 
-# ==================== DECORATORS E UTILITIES ====================
+# ==================== DECORATORS E UTILITIES ====================================================================================================
 def validate_positive(func: Callable) -> Callable:
-    """Decorator para validar parâmetros numéricos positivos"""
+    """
+    Decorador para validar que todos os parâmetros numéricos são positivos.
+
+    Args:
+        func (Callable): Função a ser decorada.
+
+    Returns:
+        Callable: Função decorada que lança ValueError para valores negativos.
+    """
     @wraps(func)
     def wrapper(self, *args, **kwargs):
         for name, value in zip(func.__code__.co_varnames[1:], args):
@@ -119,20 +185,34 @@ def validate_positive(func: Callable) -> Callable:
     return wrapper
 
 def exp_curve(x: float, factor: float = 4.0) -> float:
-    """Curva exponencial suave para envelope ADSR"""
+    """
+    Calcula uma curva exponencial suave para envelopes ADSR.
+
+    Args:
+        x (float): Valor de entrada (0 a 1).
+        factor (float): Fator de suavização da curva.
+
+    Returns:
+        float: Valor suavizado.
+    """
     return 1 - np.exp(-factor * x)
 
 
-# ==================== CLASSE PRINCIPAL ====================
+# ==================== CLASSE PRINCIPAL ====================================================================================================
 class MidiSynth:
-    """Classe principal do sintetizador MIDI"""
+    """
+    Classe principal do sintetizador MIDI.
+
+    Responsável por inicializar o áudio, processar eventos MIDI,
+    gerenciar vozes, gerar áudio em tempo real e aplicar envelopes e filtros.
+    """
     
     def __init__(self, config: SynthConfig = SynthConfig()):
         """
-        Inicializa o sintetizador com a configuração especificada
-        
+        Inicializa o sintetizador com a configuração especificada.
+
         Args:
-            config: Objeto SynthConfig com parâmetros de configuração
+            config (SynthConfig): Objeto de configuração do sintetizador.
         """
         self.config = config
         self.voices: Dict[int, VoiceState] = {}
@@ -144,9 +224,14 @@ class MidiSynth:
         self._init_audio_stream()
         self._init_midi()
 
-    # ==================== INICIALIZAÇÃO ====================
+    # ==================== INICIALIZAÇÃO ====================================================================================================
     def _init_audio_stream(self) -> None:
-        """Configuração robusta do stream de áudio com verificação de dispositivos"""
+        """
+        Inicializa o stream de áudio, configurando dispositivos e parâmetros.
+
+        Raises:
+            Exception: Em caso de falha na configuração do áudio.
+        """
         try:
             print("=== Configuração de Áudio ===")
             print(f"Dispositivos disponíveis:\n{sd.query_devices()}\n")
@@ -163,7 +248,9 @@ class MidiSynth:
             raise
 
     def _init_midi(self) -> None:
-        """Inicializa a interface MIDI se especificado na configuração"""
+        """
+        Inicializa a interface MIDI se especificado na configuração.
+        """
         if self.config.midi_port:
             try:
                 self._midi_in = mido.open_input(self.config.midi_port)
@@ -171,9 +258,14 @@ class MidiSynth:
             except Exception as e:
                 print(f"Erro MIDI: {e}")
 
-    # ==================== PROCESSAMENTO MIDI ====================
+    # ==================== PROCESSAMENTO MIDI ====================================================================================================
     def _midi_callback(self, message: mido.Message) -> None:
-        """Callback para processamento de mensagens MIDI recebidas"""
+        """
+        Callback para processamento de mensagens MIDI recebidas.
+
+        Args:
+            message (mido.Message): Mensagem MIDI recebida.
+        """
         match message.type:
             case 'note_on' if message.velocity > 0:
                 self._note_on(message.note, message.velocity/127)
@@ -186,7 +278,16 @@ class MidiSynth:
 
     # AudioSynth.py - Método _note_on (Versão Corrigida)
     def _note_on(self, note: int, velocity: float) -> None:
-        """Implementação robusta com validação completa"""
+        """
+        Processa o início de uma nota musical, criando uma nova voz.
+
+        Args:
+            note (int): Número da nota MIDI (0-127).
+            velocity (float): Velocidade da nota (0.0-1.0).
+
+        Raises:
+            ValueError: Se a nota for inválida.
+        """
         try:
             # Validação rigorosa
             if not isinstance(note, int) or not (0 <= note <= 127):
@@ -208,7 +309,7 @@ class MidiSynth:
                 self.voices[note] = VoiceState(
                     frequency=freq,
                     velocity=velocity,
-                    phase=0.0,  # Reset crítico de fase
+                    phase=0.0,
                     active=True,
                     release_start_time=None
                 )
@@ -220,13 +321,27 @@ class MidiSynth:
             raise
 
     def _note_off(self, note: int) -> None:
-        """Processa o término de uma nota musical"""
-        if note in self.voices:
-            self.voices[note].active = False
+        """
+        Processa o término de uma nota musical, iniciando o release.
 
-    # ==================== GERAÇÃO DE ÁUDIO ====================
+        Args:
+            note (int): Número da nota MIDI.
+        """
+        with self.voices_lock:
+            if note in self.voices:
+                self.voices[note].active = False
+
+    # ==================== GERAÇÃO DE ÁUDIO ====================================================================================================
     def _audio_callback(self, outdata: np.ndarray, frames: int, time, status) -> None:
-        """Callback de áudio com monitoramento completo"""
+        """
+        Callback de áudio chamado pelo stream para gerar o áudio em tempo real.
+
+        Args:
+            outdata (np.ndarray): Buffer de saída de áudio.
+            frames (int): Número de frames a serem processados.
+            time: Objeto de tempo do stream.
+            status: Status do stream.
+        """
         if status:
             print(f"⚠️ Status do stream: {status}")
 
@@ -265,6 +380,8 @@ class MidiSynth:
                     self.voices.pop(note, None)
 
             # Prevenção de clipping e saída
+            if np.max(np.abs(output)) > 1.0:
+                output /= np.max(np.abs(output))  # Normaliza o áudio para evitar clipping
             np.clip(output, -1, 1, out=outdata)
             
             # Debug de saída
@@ -273,9 +390,19 @@ class MidiSynth:
 
         except Exception as e:
             print(f"⛔ ERRO NO CALLBACK: {str(e)}")
-            raise
+            outdata.fill(0)  # Evita ruídos no áudio
 
     def _generate_voice_wave(self, voice: VoiceState, t: np.ndarray) -> np.ndarray:
+        """
+        Gera a forma de onda para uma voz específica, aplicando modulações e filtros.
+
+        Args:
+            voice (VoiceState): Estado da voz.
+            t (np.ndarray): Array de tempo.
+
+        Returns:
+            np.ndarray: Onda gerada para a voz.
+        """
             # Calcula a frequência com LFO e HFO (como já tínhamos configurado)
         t_diff = (t[:, 0] - t[0, 0])
         base_freq = voice.frequency
@@ -295,6 +422,7 @@ class MidiSynth:
         # Fase
         phase_increment = 2 * np.pi * base_freq * t_diff
         voice.phase += phase_increment[-1]
+        voice.phase %= 2 * np.pi
         carrier_phase = voice.phase - phase_increment[::-1]
         phase = carrier_phase  # ✅ Isto resolve o erro: sempre define phase
 
@@ -391,33 +519,21 @@ class MidiSynth:
                 raise ValueError(f"Tipo de onda não suportado: {self.config.default_waveform}")
             # Aplicação de filtro se necessário
             
-        nyquist = 0.5 * self.config.sample_rate
-        norm_freq = self.config.filter_freq / nyquist
-
-        try:
-            if self.config.filter_type == "lowpass":
-                b, a = butter(N=2, Wn=norm_freq, btype='low')
-            elif self.config.filter_type == "highpass":
-                b, a = butter(N=2, Wn=norm_freq, btype='high')
-            elif self.config.filter_type == "bandpass":
-                bandwidth = self.config.filter_freq / self.config.filter_q
-                low = (self.config.filter_freq - bandwidth / 2) / nyquist
-                high = (self.config.filter_freq + bandwidth / 2) / nyquist
-                b, a = butter(N=2, Wn=[low, high], btype='band')
-            else:
-                b, a = None, None
-
-            if b is not None and a is not None:
-                wave = lfilter(b, a, wave)
-
-        except Exception as e:
-            print(f"Erro no filtro: {e}")
+        wave = self._apply_filter(wave)
         return wave.astype(np.float32)
 
-    # ==================== ENVELOPE ADSR ====================
+    # ==================== ENVELOPE ADSR ========================================================================================================================
     # AudioSynth.py - Método _calculate_adsr (Versão Corrigida)
     def _calculate_adsr(self, voice: VoiceState) -> float:
-        """Cálculo do envelope com proteção completa"""
+        """
+        Calcula o valor do envelope ADSR para uma voz.
+
+        Args:
+            voice (VoiceState): Estado da voz.
+
+        Returns:
+            float: Valor do envelope (0.0 a 1.0).
+        """
         try:
             total_time = voice.age
             
@@ -448,6 +564,8 @@ class MidiSynth:
 
             # Garantia de valores válidos
             adsr = np.clip(adsr, 0.0, 1.0).item()
+            if np.isnan(adsr) or np.isinf(adsr):
+                adsr = 0.0  # Garante que o valor seja válido
 
             # Debug seletivo
             if adsr > 0.01:
@@ -480,22 +598,74 @@ class MidiSynth:
             print(f"⛔ ERRO NO ADSR: {str(e)}")
             return 0.0
 
-    # ==================== UTILITÁRIOS ====================
+    
+    def _apply_filter(self, wave: np.ndarray) -> np.ndarray:
+        """
+        Aplica o filtro configurado ao sinal de áudio.
+
+        Args:
+            wave (np.ndarray): Sinal de entrada.
+
+        Returns:
+            np.ndarray: Sinal filtrado.
+        """
+        try:
+            nyquist = 0.5 * self.config.sample_rate
+            norm_freq = self.config.filter_freq / nyquist
+            norm_freq = np.clip(norm_freq, 0.0, 1.0)  # Etapa 1.2
+
+            if self.config.filter_type == "lowpass":
+                b, a = butter(N=2, Wn=norm_freq, btype='low')
+            elif self.config.filter_type == "highpass":
+                b, a = butter(N=2, Wn=norm_freq, btype='high')
+            elif self.config.filter_type == "bandpass":
+                bandwidth = self.config.filter_freq / self.config.filter_q
+                low = (self.config.filter_freq - bandwidth/2) / nyquist
+                high = (self.config.filter_freq + bandwidth/2) / nyquist
+                low, high = np.clip([low, high], 0.0, 1.0)
+                b, a = butter(N=2, Wn=[low, high], btype='band')
+            else:
+                return wave
+
+            return lfilter(b, a, wave)
+
+        except Exception as e:
+            print(f"Erro no filtro: {e}")
+            return wave
+
+
+# ==================== UTILITÁRIOS ====================================================================================================
     @staticmethod
     def _note_to_freq(note: int) -> float:
-        """Conversão segura com validação"""
+        """
+        Converte um número de nota MIDI para frequência em Hz.
+
+        Args:
+            note (int): Número da nota MIDI (0-127).
+
+        Returns:
+            float: Frequência correspondente em Hz.
+
+        Raises:
+            ValueError: Se a nota for inválida.
+        """
         if not isinstance(note, int) or not (0 <= note <= 127):
             raise ValueError(f"Nota inválida: {note}")
         return 440.0 * (2.0 ** ((note - 69) / 12.0))
 
     def _remove_oldest_voice(self) -> None:
-        """Remove a voz mais antiga quando atinge a polifonia máxima"""
-        oldest_note = min(self.voices.keys(), key=lambda k: self.voices[k].age)
-        del self.voices[oldest_note]
+        """
+        Remove a voz mais antiga quando o limite de polifonia é atingido.
+        """
+        with self.voices_lock:
+            oldest_note = min(self.voices.keys(), key=lambda k: (self.voices[k].age, -self.voices[k].velocity))
+            del self.voices[oldest_note]
 
-    # ==================== CONTROLE DE FLUXO ====================
+    # ==================== CONTROLE DE FLUXO ====================================================================================================
     def start(self) -> None:
-        """Inicia a reprodução de áudio e processamento MIDI"""
+        """
+        Inicia a reprodução de áudio e o processamento MIDI.
+        """
         self._stream = sd.OutputStream(
             callback=self._audio_callback,
             samplerate=self.config.sample_rate,
@@ -505,22 +675,33 @@ class MidiSynth:
         self._stream.start()
 
     def stop(self) -> None:
-        """Para a reprodução e libera recursos"""
-        if self._stream:
+        """
+        Para a reprodução de áudio e libera recursos do sintetizador.
+        """
+        if self._stream and self._stream.active:
             self._stream.close()
+            self._stream = None
         if self._midi_in:
             self._midi_in.close()
+            self._midi_in = None
 
     def __enter__(self):
-        """Suporte para gerenciamento de contexto"""
+        """
+        Suporte para gerenciamento de contexto (with statement).
+
+        Returns:
+            MidiSynth: Instância do sintetizador.
+        """
         self.start()
         return self
 
     def __exit__(self, *args):
-        """Garante liberação de recursos ao sair do contexto"""
+        """
+        Garante liberação de recursos ao sair do contexto.
+        """
         self.stop()
 
-# ==================== EXEMPLO DE USO ====================
+# ==================== EXEMPLO DE USO ========================================================================================================================
 if __name__ == "__main__":
     # Configuração básica para teste
     config = SynthConfig(
