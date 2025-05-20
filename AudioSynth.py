@@ -103,31 +103,41 @@ class SynthConfig:
         filter_freq (float): Frequência de corte do filtro.
         filter_q (float): Q do filtro.
     """
-    sample_rate: int = 44100
-    buffer_size: int = 64
-    max_polyphony: int = 16
+    sample_rate: int = 22050  # Menor taxa de amostragem reduz pela metade o custo computacional.
+    buffer_size: int = 128    # Aumentar o buffer diminui a frequência de chamadas de áudio, melhor para performance.
+    max_polyphony: int = 8    # Reduzir a polifonia reduz muito o custo por frame de áudio.
     midi_port: Optional[str] = None
-    default_waveform: WaveType = WaveType.SINE
-    fm_mod_freq: float = 5.0
-    fm_mod_index: float = 1.0
-    pulse_width: float = 0.5
-    wavetable: np.ndarray = None
-    attack_time: float = 0.1
-    decay_time: float = 0.2
+
+    default_waveform: WaveType = WaveType.SINE  # Seno é o mais leve de gerar (1 operação trigonométrica por sample).
+    fm_mod_freq: float = 0.0    # Desativa FM por padrão.
+    fm_mod_index: float = 0.0   # Zero garante que FM não é processado.
+
+    pulse_width: float = 0.5  # Valor padrão, mas evitar formas de onda pulsadas melhora performance.
+
+    wavetable: np.ndarray = None  # Apenas use se necessário, e com waveforms pré-interpoladas de baixa resolução.
+
+    attack_time: float = 0.01  # Ataques rápidos consomem menos CPU (menos samples para transições).
+    decay_time: float = 0.05
     sustain_level: float = 0.7
-    release_time: float = 0.3
-    adsr_curve: ADSRCurve = ADSRCurve.LINEAR
-    additive_harmonics: int = 8  # Número de harmônicos para síntese aditiva
-    super_saw_voices: int = 7    # Número de vozes para Super Saw
-    lfo_freq: float = 5.0
+    release_time: float = 0.05  # Releases curtos liberam vozes mais rápido.
+
+    adsr_curve: ADSRCurve = ADSRCurve.LINEAR  # Linear é mais leve que exponencial.
+
+    additive_harmonics: int = 3  # Menos harmônicos = menos somas senoidais = mais performance.
+    super_saw_voices: int = 3    # Reduzir de 7 para 3 já simula o efeito mantendo performance.
+
+    lfo_freq: float = 0.0   # Desativa LFO por padrão.
     lfo_depth: float = 0.0
-    lfo_target: str = "pitch"  # ou "pulse", "volume", etc.
-    hfo_freq: float = 200.0
+    lfo_target: str = "pitch"
+
+    hfo_freq: float = 0.0   # Desativa HFO (frequência alta = custo alto).
     hfo_depth: float = 0.0
     hfo_target: str = "pitch"
-    filter_type: str = "lowpass"   # 'lowpass', 'highpass', 'bandpass'
-    filter_freq: float = 1000.0
-    filter_q: float = 0.707
+
+    filter_type: str = "lowpass"
+    filter_freq: float = 5000.0  # Alta o suficiente para não cortar muito, mas evita recalcular filtros em tempo real.
+    filter_q: float = 0.707      # Valor padrão (Butterworth), não ressonante.
+
 
     def validate(self):
         """
@@ -237,7 +247,7 @@ class MidiSynth:
             raise RuntimeError("⛔ Nenhum dispositivo de áudio disponível!")
 
         print("Dispositivos disponíveis:")
-        
+
         for i, d in enumerate(devices):
             print(f"  [{i}] {d['name']} ({d['max_output_channels']} canais)")
         try:
