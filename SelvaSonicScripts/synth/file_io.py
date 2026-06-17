@@ -38,12 +38,16 @@ def save_config(config, filename="synth_config.json"):
     Parâmetros:
         config: Objeto de configuração a ser salvo (dataclass).
         filename (str): Nome do arquivo de saída (padrão: "synth_config.json").
-
-    Notas:
-        - O arquivo é salvo com indentação para facilitar a leitura.
-        - Enums são convertidos para strings para garantir compatibilidade com JSON.
     """
     data = enum_to_str(config)
+    
+    # NOVO: Proteção Crítica contra Erros de Serialização!
+    # Como o JSON nativo do Python não consegue converter arrays do NumPy (np.ndarray),
+    # removemos estes objetos temporários da cópia de salvamento para evitar que o programa crashe.
+    data.pop("bandlimited_tables", None)
+    data.pop("last_audio_buffer", None)
+    data.pop("wavetable", None) # Remove também se houver alguma wavetable customizada em memória
+
     with open(filename, "w", encoding="utf-8") as f:
         json.dump(data, f, indent=4)
 

@@ -1,6 +1,8 @@
 import numpy as np
 from .waveforms import generate_wave
 from .envelopes import calculate_adsr
+from queue import Queue
+visual_queue = Queue(maxsize=2)
 
 def audio_callback(outdata: np.ndarray, frames: int, time, status, config, voices, voices_lock):
     """
@@ -40,20 +42,28 @@ def audio_callback(outdata: np.ndarray, frames: int, time, status, config, voice
 
             for note, voice in current_voices:
                 try:
-                    voice.age += frames / config.sample_rate
-                    adsr = calculate_adsr(voice, config)
-                    voice.envelope = adsr
+                    # O cálculo vetorizado do ADSR recebe os frames e já atualiza voice.age
+                    adsr_array = calculate_adsr(voice, config, frames)
 
-                    if adsr > 1e-4:
+                    # Se o pico máximo do array de envelope for audível, geramos a onda
+                    if np.max(adsr_array) > 1e-4:
                         wave = generate_wave(voice, t, config)
+                        
+                        # Garante que a wave seja 2D [frames, 1] para o broadcasting funcionar
                         if wave.ndim == 1:
-                            output += np.stack([wave, wave], axis=-1) * adsr * voice.velocity
-                        else:
-                            output += wave * adsr * voice.velocity
+                            wave = wave[:, None]
+                            
+                        # gain agora é um array do tamanho do bloco, moldando o volume perfeitamente
+                        gain = adsr_array * voice.velocity
+                        
+                        # Mixagem Estéreo Direta (Melhoria 2 já aplicada aqui)
+                        output[:, 0] += (wave * gain)[:, 0]
+                        output[:, 1] += (wave * gain)[:, 0]
                     else:
                         to_remove.add(note)
 
-                    if not voice.active and adsr <= 1e-6:
+                    # Remove vozes inativas que já completaram o release
+                    if not voice.active and adsr_array[-1, 0] <= 1e-6:
                         to_remove.add(note)
 
                 except Exception as e:
@@ -63,11 +73,20 @@ def audio_callback(outdata: np.ndarray, frames: int, time, status, config, voice
             for note in to_remove:
                 voices.pop(note, None)
 
-        if np.max(np.abs(output)) > 1.0:
-            output /= np.max(np.abs(output))
-        np.clip(output, -1, 1, out=outdata)
+        # Soft Clipping: A função tanh curva suavemente os picos que ultrapassam 1.0, 
+        # criando uma saturação harmônica ("quente") em vez de um corte digital abrupto.
+        # O parâmetro out=outdata garante que o resultado vá direto para o buffer de saída.
+        np.tanh(output, out=outdata)
 
-        peak = np.max(np.abs(output))
+        visual_queue.put(outdata.copy())
+
+        try:
+            if visual_queue.full():
+                visual_queue.get_nowait() # Remove o buffer antigo para dar lugar ao novo
+            visual_queue.put_nowait(outdata.copy())
+        except:
+            pass
+        peak = np.max(np.abs(outdata)) # Atualizado para ler o outdata já clipado
         print(f"🔈 Pico de saída: {peak:.2f} | Vozes: {len(voices)}", end='\r')
 
     except Exception as e:

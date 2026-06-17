@@ -1,7 +1,8 @@
 from enum import Enum
-from dataclasses import dataclass
+from dataclasses import dataclass, field 
 import numpy as np
 from typing import Optional
+from .wavetables import generate_bandlimited_tables 
 
 
 class WaveType(Enum):
@@ -76,8 +77,8 @@ class SynthConfig:
         filter_freq (float): Frequência de corte do filtro.
         filter_q (float): Q do filtro.
     """
-    sample_rate: int = 22050  # Menor taxa de amostragem reduz pela metade o custo computacional.
-    buffer_size: int = 128    # Aumentar o buffer diminui a frequência de chamadas de áudio, melhor para performance.
+    sample_rate: int = 44100  # Menor taxa de amostragem reduz pela metade o custo computacional.
+    buffer_size: int = 512    # Aumentar o buffer diminui a frequência de chamadas de áudio, melhor para performance.
     max_polyphony: int = 8    # Reduzir a polifonia reduz muito o custo por frame de áudio.
     midi_port: Optional[str] = None
 
@@ -110,7 +111,18 @@ class SynthConfig:
     filter_type: str = "lowpass"
     filter_freq: float = 5000.0  # Alta o suficiente para não cortar muito, mas evita recalcular filtros em tempo real.
     filter_q: float = 0.707      # Valor padrão (Butterworth), não ressonante.
+    wavetable: np.ndarray = None
+    bandlimited_tables: dict = field(default_factory=dict)
+    last_audio_buffer: np.ndarray = None
 
+    def __post_init__(self):
+        """
+        Método especial executado automaticamente após a classe ser instanciada.
+        Ele injeta o banco de ondas no momento do boot do sintetizador.
+        """
+        if not self.bandlimited_tables:
+            # Passamos o sample_rate atual para garantir que o Nyquist seja calculado corretamente
+            self.bandlimited_tables = generate_bandlimited_tables(self.sample_rate)
 
     def validate(self):
         """

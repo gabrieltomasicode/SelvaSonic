@@ -3,74 +3,80 @@ from .config import ADSRCurve
 from .voices import VoiceState
 from .utils import exp_curve, clamp
 
-def calculate_adsr(voice: VoiceState, config) -> float:
+def calculate_adsr(voice: VoiceState, config, frames: int) -> np.ndarray:
     """
-    Calcula o valor do envelope ADSR (Attack, Decay, Sustain, Release) para uma voz sintetizada.
+    Calcula o envelope ADSR vetorizado para um bloco inteiro de áudio.
 
-    Esta função determina o valor atual do envelope ADSR de uma voz, com base em seu tempo de vida (age),
-    estado de liberação (release) e parâmetros de configuração. O envelope é utilizado para modelar a evolução
-    da amplitude do som ao longo do tempo, proporcionando maior realismo e controle dinâmico.
+    Em vez de retornar um único valor, esta função gera um array de envelope
+    amostra por amostra para o tamanho do frame atual. Isso elimina o "zipper noise"
+    (ruído de degrau) ao suavizar as transições de volume durante o buffer.
 
     Parâmetros:
-        voice (VoiceState): Instância representando o estado atual da voz, incluindo idade, envelope e status de liberação.
-        config: Objeto de configuração contendo os parâmetros do envelope ADSR (attack_time, decay_time, sustain_level, release_time, adsr_curve).
+        voice (VoiceState): Estado atual da voz.
+        config: Objeto de configuração do sintetizador.
+        frames (int): Número de amostras no bloco de áudio atual.
 
     Retorna:
-        float: Valor do envelope ADSR no instante atual, variando entre 0.0 e 1.0.
-
-    Notas:
-        - O envelope é atualizado automaticamente no objeto da voz.
-        - Suporta curvas lineares e exponenciais, conforme definido em config.adsr_curve.
-        - Se ocorrer erro durante o cálculo, retorna 0.0 e imprime mensagem de erro.
-        - Quando o envelope atinge valor inferior a 0.001, a voz é marcada como inativa.
-
-    Exceções:
-        Nenhuma exceção é propagada. Todas as exceções são capturadas e tratadas internamente.
+        np.ndarray: Array de formato [frames, 1] contendo os valores do envelope.
     """
     try:
-        total_time = voice.age
+        # Cria um array com a "idade" exata da voz em cada sample do buffer
+        ages = voice.age + np.arange(frames) / config.sample_rate
+        adsr = np.zeros(frames, dtype=np.float32)
 
         if voice.release_start_time is None:
-            # Fases Attack, Decay, Sustain
-            if total_time < config.attack_time:
-                adsr = total_time / max(config.attack_time, 1e-6)
-            elif total_time < (config.attack_time + config.decay_time):
-                decay_progress = (total_time - config.attack_time) / max(config.decay_time, 1e-6)
-                adsr = 1 - (1 - config.sustain_level) * decay_progress
-            else:
-                adsr = config.sustain_level
-            # Atualiza o envelope para o valor atual
-            voice.envelope = adsr
+            attack_time = max(config.attack_time, 1e-6)
+            decay_time = max(config.decay_time, 1e-6)
+
+            # Fase Attack
+            attack_mask = ages < attack_time
+            adsr[attack_mask] = ages[attack_mask] / attack_time
+
+            # Fase Decay
+            decay_mask = (ages >= attack_time) & (ages < attack_time + decay_time)
+            decay_progress = (ages[decay_mask] - attack_time) / decay_time
+            adsr[decay_mask] = 1.0 - (1.0 - config.sustain_level) * decay_progress
+
+            # Fase Sustain
+            sustain_mask = ages >= attack_time + decay_time
+            adsr[sustain_mask] = config.sustain_level
+
+            # Salva o último valor do envelope para usar num futuro Release
+            voice.envelope = float(adsr[-1])
         else:
-            # Release
-            release_elapsed = total_time - voice.release_start_time
-            # O envelope inicial do release deve ser o valor do envelope no momento do note_off
+            # Fase Release
             envelope_at_release = getattr(voice, "envelope_at_release", None)
             if envelope_at_release is None:
                 envelope_at_release = voice.envelope
                 voice.envelope_at_release = envelope_at_release
-            release_progress = min(release_elapsed / max(config.release_time, 1e-6), 1.0)
-            adsr = max(0.0, envelope_at_release * (1 - release_progress))
+
+            release_time = max(config.release_time, 1e-6)
+            release_elapsed = ages - voice.release_start_time
+            release_progress = np.clip(release_elapsed / release_time, 0.0, 1.0)
+            adsr = envelope_at_release * (1.0 - release_progress)
+
+            voice.envelope = float(adsr[-1])
 
         # Aplicação da curva
         if config.adsr_curve == ADSRCurve.EXPONENTIAL:
             adsr = exp_curve(adsr, factor=4.0)
 
-        # Garantia de valores válidos
-        adsr = clamp(adsr, 0.0, 1.0)
-        if np.isnan(adsr) or np.isinf(adsr):
-            adsr = 0.0
+        # Garantia de limites
+        adsr = np.clip(adsr, 0.0, 1.0)
 
-        # Se envelope estiver abaixo do limiar prático, corte a nota
-        if adsr < 0.001:
+        # Atualiza a idade da voz para o INÍCIO do próximo bloco de áudio
+        voice.age += frames / config.sample_rate
+
+        # Se no final do bloco a nota morreu, desativa a voz
+        if adsr[-1] < 0.001 and voice.release_start_time is not None:
             voice.active = False
-            adsr = 0.0
 
-        return float(adsr)
+        # Retorna formatado como coluna para facilitar o broadcast na mixagem
+        return adsr[:, None]
 
     except Exception as e:
         print(f"⛔ ERRO NO ADSR: {str(e)}")
-        return 0.0
+        return np.zeros((frames, 1), dtype=np.float32)
 
 def update_envelope(voice, attack: float = 0.01, decay: float = 0.1,
                     sustain: float = 0.7, release: float = 0.3) -> None:

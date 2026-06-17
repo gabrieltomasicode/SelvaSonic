@@ -25,15 +25,31 @@ def generate_static_wave(phase, config):
         - Em caso de erro, retorna um array de zeros.
     """
     try:
+        # Definimos a nota 69 (A4) como padrão para o desenho estático
+        note_idx = 69
         match config.default_waveform:
             case WaveType.SINE:
                 return np.sin(phase)
             case WaveType.SQUARE:
-                return np.sign(np.sin(phase))
+                # Busca a onda quadrada pré-calculada e sem aliasing do nosso cache
+                table = config.bandlimited_tables['square'].get(note_idx)
+                if table is not None:
+                    table_size = len(table)
+                    position = (phase % (2 * np.pi)) / (2 * np.pi) * table_size
+                    return np.interp(position, np.arange(table_size), table)
+                else:
+                    return np.sign(np.sin(phase)) # Fallback seguro
             case WaveType.TRIANGLE:
                 return (2 * np.arcsin(np.sin(phase)) / np.pi)
             case WaveType.SAWTOOTH:
-                return ((phase % (2*np.pi)) / np.pi - 1)
+                # Busca a onda dente de serra pré-calculada e sem aliasing do nosso cache
+                table = config.bandlimited_tables['sawtooth'].get(note_idx)
+                if table is not None:
+                    table_size = len(table)
+                    position = (phase % (2 * np.pi)) / (2 * np.pi) * table_size
+                    return np.interp(position, np.arange(table_size), table)
+                else:
+                    return ((phase % (2*np.pi)) / np.pi - 1) # Fallback seguro
             case WaveType.NOISE:
                 return np.random.uniform(-1, 1, phase.shape)
             case WaveType.PULSE:
@@ -63,6 +79,7 @@ def generate_static_wave(phase, config):
                     saws.append(saw)
                 wave = np.mean(saws, axis=0)
                 return wave.astype(np.float32)
+                
             case WaveType.PINK_NOISE:
                 white = np.random.uniform(-1, 1, phase.shape)
                 b = [0.049922035, -0.095993537, 0.050612699, -0.004408786]

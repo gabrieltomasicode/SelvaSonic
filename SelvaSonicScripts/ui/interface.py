@@ -1,5 +1,9 @@
 import tkinter as tk
 from tkinter import ttk, filedialog, messagebox
+
+from queue import Empty, Queue
+from synth.audio import visual_queue
+from synth.wavetables import generate_bandlimited_tables
 from .keyboard import KeyboardMIDI
 from synth.synth import MidiSynth
 from synth.file_io import save_config, load_config
@@ -148,7 +152,23 @@ class FullSynthInterface:
         )
         if file_path:
             print("Carregando configuração de:", file_path)
+            
+            # 🔄 NOVO: Guardamos o sample_rate que está a rodar atualmente antes de carregar o novo
+            old_sample_rate = self.config.sample_rate
+            
             load_config(self.config, filename=file_path)
+            
+            # 🔄 NOVO: Se o ficheiro JSON alterou o sample_rate, recalculamos as Wavetables limitadas em banda
+            if self.config.sample_rate != old_sample_rate:
+                print(f"🔄 Taxa de amostragem alterada de {old_sample_rate}Hz para {self.config.sample_rate}Hz. Recalculando as tabelas...")
+                from synth.wavetables import generate_bandlimited_tables
+                
+                # Força a atualização do cache de ondas limpas de aliasing
+                self.config.bandlimited_tables = generate_bandlimited_tables(self.config.sample_rate)
+                
+                # Como a taxa de amostragem mudou, reiniciamos também a placa de som (hardware stream)
+                self.restart_audio_stream()
+            
             self.synth.config = self.config
             self.update_controls_from_config()
             messagebox.showinfo("Configuração", "Configuração carregada com sucesso!")
@@ -465,6 +485,7 @@ class FullSynthInterface:
         try:
             new_rate = int(self.sample_rate.get())
             self.config.sample_rate = new_rate
+            self.config.bandlimited_tables = generate_bandlimited_tables(new_rate)
             self.restart_audio_stream()
         except Exception as e:
             print(f"Erro ao atualizar sample rate: {e}")
@@ -540,39 +561,56 @@ class FullSynthInterface:
 
     def update_visuals(self):
         """
-        Atualiza a visualização da forma de onda em tempo real.
+        Atualiza periodicamente a visualização da forma de onda no gráfico da interface.
+
+        Esta função obtém o último buffer de áudio gerado em tempo real pelo motor de síntese 
+        (através do atributo `config.last_audio_buffer`). Ela extrai o canal esquerdo do sinal 
+        estéreo e atualiza o plot do Matplotlib. Caso não existam vozes ativas, a atualização 
+        esteja pausada ou o buffer ainda não tenha sido populado, a função renderiza uma onda 
+        estática de referência (modo estático/pausado).
 
         Notas:
-            - Mostra preview estático se não houver vozes ativas.
-            - Mostra preview ao vivo se houver vozes.
+            - Esta abordagem desacopla 100% o cálculo de DSP da Thread principal da UI, 
+              eliminando travamentos e gargalos de uso de CPU.
+            - Agenda a sua próxima execução recursiva automaticamente após 100ms via `self.master.after`.
+            - Consome o buffer de saída real da placa de som, garantindo fidelidade visual absoluta.
         """
-          # Debug 1
-        t = np.linspace(0, 0.03, 1000)
-        mix = np.zeros_like(t)
-        voices = self.synth.voice_manager.get_voices()
-        if not voices:
-            # Mostra preview estático se não houver vozes
+        # Se a visualização estiver pausada pelo usuário, mantém o laço vivo mas pula a renderização
+        if getattr(self, 'visual_paused', False):
+            self.master.after(100, self.update_visuals)
+            return
+
+        buffer = self.synth.config.last_audio_buffer
+        
+        # Se não há som ou o motor ainda não gerou o buffer, desenha o modo estático
+        if buffer is None or not self.synth.voice_manager.get_voices():
+            t = np.linspace(0, 0.03, 500)
             phase = 2 * np.pi * 440 * t
             wave = generate_static_wave(phase, self.config)
             update_waveform_plot(self.ax, t, wave, title="Waveform Preview (Modo Estático)")
             self.canvas.draw()
             
+            # Reagenda o próximo frame e sai da função
+            self.master.after(100, self.update_visuals)
             return
 
-        with self.synth.voice_manager.get_lock():
-            for voice in self.synth.voice_manager.get_voices().values():
-                print("Processando voz:", voice)  # Debug 2
-                wave = generate_wave(voice, t, self.synth.config)
-                adsr = calculate_adsr(voice, self.synth.config)
-                print("Max wave:", np.max(wave), "ADSR:", adsr)  # Debug 3
-                mix += wave * adsr * voice.velocity
+        try:
+            # Tenta pegar o buffer mais recente sem travar a thread da UI
+            buffer = visual_queue.get_nowait()
+            
+            # Desenha o gráfico (como já fizemos antes)
+            mix = buffer[:, 0]
+            duration = len(mix) / self.config.sample_rate
+            t = np.linspace(0, duration, len(mix))
+            update_waveform_plot(self.ax, t, mix, title="Waveform Preview (Ao Vivo)")
+            self.canvas.draw()
+            
+        except Empty:
+            # Se a fila estiver vazia, apenas mantemos o gráfico atual ou desenhamos o estático
+            pass 
 
-        print("Mix max:", np.max(mix), "min:", np.min(mix))  # Debug 4
-
-        mix = np.clip(mix, -1.0, 1.0)
-        update_waveform_plot(self.ax, t, mix, title="Waveform Preview (ao vivo)")
-        self.canvas.draw()
-        print("Desenhou canvas")  # Debug 5
+        # Reagenda para 50ms para manter a fluidez
+        self.master.after(50, self.update_visuals)
 
     def start_visual_updates(self):
         """
@@ -601,15 +639,23 @@ class FullSynthInterface:
 
     def toggle_visual(self):
         """
-        Alterna entre pausar e retomar a visualização da forma de onda.
+        Alterna entre pausar e retomar a animação de rastreamento do gráfico visual.
 
-        Notas:
-            - Atualiza o texto do botão de pausa/retomada.
-            - Mostra preview estático se não houver vozes.
+        Modifica o estado booleano interno (`self.visual_paused`) e altera dinamicamente 
+        o rótulo de texto do botão de controle na interface. Quando o estado muda para pausado, 
+        força o desenho instantâneo de uma forma de onda estática padrão para indicar a interrupção.
         """
-        self.visual_paused = not self.visual_paused
+        self.visual_paused = not getattr(self, 'visual_paused', False)
         new_text = "▶ Retomar Visualização" if self.visual_paused else "⏸ Pausar Visualização"
         self.pause_button.config(text=new_text)
+
+        # Se acabou de pausar, limpa a tela substituindo por uma onda estática estável
+        if self.visual_paused:
+            t = np.linspace(0, 0.03, 500)
+            phase = 2 * np.pi * 440 * t
+            wave = generate_static_wave(phase, self.config)
+            update_waveform_plot(self.ax, t, wave, title="Waveform Preview (Pausado)")
+            self.canvas.draw()
 
         
         if not self.synth.voice_manager.get_voices():
@@ -628,7 +674,7 @@ class FullSynthInterface:
             mix = np.zeros_like(t)
 
             with self.synth.voice_manager.get_lock():
-                for voice in self.synth.voice_manager.get_voices().values():
+                for voice in self.synth.config.last_audio_buffer:
                     wave = generate_wave(voice, t, self.synth.config)
                     adsr = calculate_adsr(voice, self.synth.config)
                     mix += wave * adsr * voice.velocity
