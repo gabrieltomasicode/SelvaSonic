@@ -16,7 +16,7 @@ class MidiSynth:
     Fornece métodos para controle dinâmico de parâmetros de síntese e gerenciamento de recursos.
     """
 
-    def __init__(self, config: SynthConfig = SynthConfig()):
+    def __init__(self, config: SynthConfig = None):
         """
         Inicializa o sintetizador MIDI.
 
@@ -27,7 +27,7 @@ class MidiSynth:
             - Inicializa o gerenciador de vozes, configura a porta MIDI e o stream de áudio.
             - Exibe mensagens informativas caso a porta MIDI não seja encontrada ou não especificada.
         """
-        self.config = config
+        self.config = config if config is not None else SynthConfig()
         self.voice_manager = VoiceManager(self.config.max_polyphony)
          
         try:

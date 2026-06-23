@@ -30,7 +30,8 @@ def audio_callback(outdata: np.ndarray, frames: int, time, status, config, voice
         Nenhuma é propagada. Todas as exceções são capturadas e registradas; o buffer de saída é zerado em caso de erro.
     """
     if status:
-        print(f"⚠️ Status do stream: {status}")
+        #print(f"⚠️ Status do stream: {status}")
+        pass
 
     try:
         output = np.zeros((frames, 2), dtype=np.float32)
@@ -67,7 +68,7 @@ def audio_callback(outdata: np.ndarray, frames: int, time, status, config, voice
                         to_remove.add(note)
 
                 except Exception as e:
-                    print(f"Erro na voz {note}: {str(e)}")
+                    #print(f"Erro na voz {note}: {str(e)}")
                     to_remove.add(note)
 
             for note in to_remove:
@@ -78,17 +79,14 @@ def audio_callback(outdata: np.ndarray, frames: int, time, status, config, voice
         # O parâmetro out=outdata garante que o resultado vá direto para o buffer de saída.
         np.tanh(output, out=outdata)
 
-        visual_queue.put(outdata.copy())
-
         try:
-            if visual_queue.full():
-                visual_queue.get_nowait() # Remove o buffer antigo para dar lugar ao novo
-            visual_queue.put_nowait(outdata.copy())
+             if visual_queue.full(): visual_queue.get_nowait()
+             visual_queue.put_nowait(outdata.copy())
         except:
-            pass
+             pass
         peak = np.max(np.abs(outdata)) # Atualizado para ler o outdata já clipado
-        print(f"🔈 Pico de saída: {peak:.2f} | Vozes: {len(voices)}", end='\r')
+        #print(f"🔈 Pico de saída: {peak:.2f} | Vozes: {len(voices)}", end='\r')
 
     except Exception as e:
-        print(f"⛔ ERRO NO CALLBACK: {str(e)}")
+        #print(f"⛔ ERRO NO CALLBACK: {str(e)}")
         outdata.fill(0)
