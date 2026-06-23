@@ -2,62 +2,258 @@ import tkinter as tk
 from tkinter import ttk
 from synth.config import SynthConfig, WaveType
 
+# ─────────────────────────────────────────────────────────────────────────────
+#  Paleta SelvaSonic
+# ─────────────────────────────────────────────────────────────────────────────
+C_AMARELO  = "#F5C800"
+C_VERDE    = "#1A7A2E"
+C_MARROM   = "#5C3317"
+C_AZUL     = "#1B4FD8"
+C_VERMELHO = "#C8281E"
+C_PRETO    = "#0A0A0A"
+C_ROXO     = "#6B2D8B"
+C_BG       = "#111111"
+C_BG2      = "#1A1A1A"
+C_BG3      = "#222222"
+C_TEXTO    = "#E8E0C8"
+C_TEXTO2   = "#A09880"
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+#  Helpers de layout reutilizáveis
+# ─────────────────────────────────────────────────────────────────────────────
+class CustomSlider(tk.Canvas):
+    def __init__(self, parent, width=200, height=20, accent=C_AMARELO):
+        super().__init__(parent, width=width, height=height, bg=C_BG2, highlightthickness=0)
+        self.accent = accent
+        self.value = 0.5
+        self.bind("<Button-1>", self._on_drag)
+        self.bind("<B1-Motion>", self._on_drag)
+        self.draw()
+
+    def draw(self):
+        self.delete("all")
+        # Desenha track
+        self.create_rectangle(0, 8, 200, 12, fill=C_BG3, outline="")
+        # Desenha progresso
+        self.create_rectangle(0, 8, 200 * self.value, 12, fill=self.accent, outline="")
+        # Desenha Thumb
+        self.create_rectangle(200 * self.value - 7, 0, 200 * self.value + 7, 20, fill=self.accent)
+
+    def _on_drag(self, event):
+        self.value = max(0, min(1, event.x / 200))
+        self.draw()
+
+def create_arrow_label(parent, text, bg=C_MARROM, fg=C_AMARELO):
+    """Cria a label com terminação em triângulo."""
+    frame = tk.Frame(parent, bg=bg)
+    
+    # Texto
+    lbl = tk.Label(frame, text=text.upper(), font=("Helvetica", 8, "bold"),
+                   bg=bg, fg=fg, padx=8, pady=3)
+    lbl.pack(side="left")
+    
+    # Triângulo (Seta)
+    canvas = tk.Canvas(frame, width=8, height=22, bg=bg, highlightthickness=0)
+    canvas.pack(side="left")
+    canvas.create_polygon(0, 0, 8, 11, 0, 22, fill=bg, outline="")
+    
+    return frame
+
+def _make_section_bar(parent, text, accent=C_AMARELO):
+    """Faixa de título de seção: borda esquerda colorida + texto em caixa alta."""
+    bar = tk.Frame(parent, bg=C_BG2)
+    bar.pack(fill="x", pady=(10, 4))
+    tk.Frame(bar, width=4, bg=accent).pack(side="left", fill="y")
+    tk.Label(
+        bar, text=text.upper(),
+        font=("Helvetica", 10, "bold"),
+        bg=C_BG2, fg=accent,
+        padx=8, pady=3
+    ).pack(side="left")
+    return bar
+
+
+def _make_subsection(parent, text):
+    """Sub-título roxo com linha separadora."""
+    frame = tk.Frame(parent, bg=C_BG2)
+    frame.pack(fill="x", pady=(8, 2))
+    tk.Label(
+        frame, text=text.upper(),
+        font=("Helvetica", 8, "bold"),
+        bg=C_BG2, fg=C_ROXO,
+        padx=6
+    ).pack(side="left")
+    tk.Frame(frame, height=1, bg=C_ROXO).pack(side="left", fill="x", expand=True, padx=(4, 6))
+    return frame
+
+
+def _make_row(parent, label_text, accent=C_AMARELO):
+    """
+    Linha com label estilo 'placa' (fundo marrom, seta) + área para slider/combo.
+    Retorna (row_frame, content_frame).
+    """
+    row = tk.Frame(parent, bg=C_BG2)
+    row.pack(fill="x", padx=8, pady=3)
+
+    # Label estilo placa com clip visual (triângulo no final via padding)
+    lbl_frame = tk.Frame(row, bg=C_MARROM)
+    lbl_frame.pack(side="left")
+    tk.Label(
+        lbl_frame, text=label_text.upper(),
+        font=("Helvetica", 8, "bold"),
+        bg=C_MARROM, fg=accent,
+        padx=8, pady=3,
+        width=14, anchor="w"
+    ).pack(side="left")
+    # "Seta" visual: pequeno canvas triangular
+    arrow = tk.Canvas(row, width=10, height=22, bg=C_BG2, highlightthickness=0)
+    arrow.pack(side="left")
+    arrow.create_polygon(0, 0, 10, 11, 0, 22, fill=C_MARROM, outline="")
+
+    content = tk.Frame(row, bg=C_BG2)
+    content.pack(side="left", fill="x", expand=True)
+    return row, content
+
+
+def _make_slider_row(parent, label_text, from_, to_, init, command,
+                     accent=C_AMARELO, fmt="{:.2f}"):
+    """
+    Linha completa: label + slider estilizado + label de valor.
+    Retorna (slider_widget, value_label).
+    """
+    _, content = _make_row(parent, label_text, accent)
+
+    val_label = tk.Label(
+        content, text=fmt.format(init),
+        font=("Courier", 9, "bold"),
+        bg=C_PRETO, fg=accent,
+        width=7, anchor="e", padx=4, pady=2,
+        relief="flat"
+    )
+    val_label.pack(side="right", padx=(4, 6))
+
+    slider = tk.Scale(
+        content,
+        from_=from_, to=to_,
+        orient="horizontal",
+        showvalue=False,
+        resolution=(to_ - from_) / 1000,
+        bg=C_BG2,
+        fg=accent,
+        troughcolor=C_BG3,
+        activebackground=accent,
+        highlightthickness=1,
+        highlightbackground=C_MARROM,
+        sliderlength=14,
+        bd=0,
+    )
+    slider.set(init)
+    slider.pack(side="left", fill="x", expand=True, padx=(0, 4))
+
+    def _update(v):
+        val_label.config(text=fmt.format(float(v)))
+        if command:
+            command(v)
+
+    slider.config(command=_update)
+    return slider, val_label
+
+
+def _make_combo_row(parent, label_text, values, init, command=None, accent=C_AMARELO):
+    """Linha com label + combobox estilizado."""
+    _, content = _make_row(parent, label_text, accent)
+    combo = ttk.Combobox(content, values=values, state="readonly",
+                         font=("Helvetica", 9))
+    combo.set(init)
+    combo.pack(side="left", fill="x", expand=True, padx=(0, 6), pady=2)
+    if command:
+        combo.bind("<<ComboboxSelected>>", command)
+    return combo
+
+
+def _panel(parent, scrollable=False):
+    """Frame interno de painel com fundo escuro."""
+    outer = tk.Frame(parent, bg=C_BG2)
+    outer.pack(fill="both", expand=True)
+    if scrollable:
+        canvas = tk.Canvas(outer, bg=C_BG2, highlightthickness=0)
+        sb = ttk.Scrollbar(outer, orient="vertical", command=canvas.yview)
+        inner = tk.Frame(canvas, bg=C_BG2)
+        inner.bind("<Configure>",
+                   lambda e: canvas.configure(scrollregion=canvas.bbox("all")))
+        canvas.create_window((0, 0), window=inner, anchor="nw")
+        canvas.configure(yscrollcommand=sb.set)
+        sb.pack(side="right", fill="y")
+        canvas.pack(side="left", fill="both", expand=True)
+        return inner
+    return outer
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+#  Oscilador
+# ─────────────────────────────────────────────────────────────────────────────
 
 def create_oscillator_controls(parent, config, on_waveform_change, on_pulse, on_ss_voices):
-    
     """
-    Cria e retorna os controles de oscilador para a interface gráfica.
-
-    Esta função monta o painel de seleção de forma de onda, ajuste de pulse width e quantidade de vozes Super Saw.
+    Cria o painel de controles do Oscilador com a estética SelvaSonic.
 
     Parâmetros:
-        parent: Widget pai onde os controles serão inseridos.
-        config: Objeto de configuração do sintetizador.
-        on_waveform_change: Callback para mudança de forma de onda.
-        on_pulse: Callback para ajuste de pulse width.
-        on_ss_voices: Callback para ajuste de vozes Super Saw.
+        parent: Widget pai.
+        config: Objeto SynthConfig.
+        on_waveform_change: Callback <<ComboboxSelected>>.
+        on_pulse: Callback(value, label) para pulse width.
+        on_ss_voices: Callback(value, label) para vozes Super Saw.
 
     Retorna:
-        dict: Dicionário com referências aos widgets criados.
+        dict com chaves: frame, waveform_combo, pulse_frame, pulse_label,
+                         pulse_scale, super_saw_frame, ss_voices_label, ss_voices.
     """
+    panel = _panel(parent)
 
-    frame = ttk.LabelFrame(parent, text="Oscilador")
+    _make_section_bar(panel, "Oscilador")
 
-    # Waveform Selection
-    ttk.Label(frame, text="Waveform:").grid(row=0, column=0, padx=5, pady=5)
-    waveform_combo = ttk.Combobox(frame, values=[w.value for w in WaveType], state="readonly")
-    waveform_combo.set(config.default_waveform.value)
-    waveform_combo.grid(row=0, column=1, padx=5, pady=5)
-    waveform_combo.bind("<<ComboboxSelected>>", on_waveform_change)
+    # ── Waveform ──────────────────────────────────────────────────────────────
+    waveform_combo = _make_combo_row(
+        panel, "Waveform",
+        values=[w.value for w in WaveType],
+        init=config.default_waveform.value,
+        command=on_waveform_change,
+        accent=C_AMARELO
+    )
 
-    # Pulse Width
-    pulse_frame = ttk.LabelFrame(frame, text="Pulse Width")
-    ttk.Label(pulse_frame, text="Width:").grid(row=0, column=0)
-    pulse_label = ttk.Label(pulse_frame, text=f"{config.pulse_width:.2f}")
-    pulse_label.grid(row=0, column=2)
-    pulse_scale = ttk.Scale(pulse_frame, from_=0.1, to=0.9)
-    if on_pulse is not None:
+    # ── Pulse Width ───────────────────────────────────────────────────────────
+    pulse_frame = tk.Frame(panel, bg=C_BG2)
+    pulse_frame.pack(fill="x")
+    _make_subsection(pulse_frame, "Pulse Width")
+    pulse_scale, pulse_label = _make_slider_row(
+        pulse_frame, "Width",
+        from_=0.1, to_=0.9, init=config.pulse_width,
+        command=None,           # sobrescrito em interface.py
+        accent=C_AMARELO
+    )
+    if on_pulse:
         pulse_scale.config(command=lambda v: on_pulse(v, pulse_label))
-    pulse_scale.set(config.pulse_width)
-    pulse_scale.grid(row=0, column=1)
-    pulse_frame.grid(row=1, column=0, padx=5, pady=5, sticky='w')
 
-    # Super Saw
-    super_saw_frame = ttk.LabelFrame(frame, text="Super Saw")
-    ttk.Label(super_saw_frame, text="Voices:").grid(row=0, column=0)
-    ss_voices_label = ttk.Label(super_saw_frame, text=str(config.super_saw_voices))
-    ss_voices_label.grid(row=0, column=2)
-    ss_voices = ttk.Scale(super_saw_frame, from_=2, to=12)
-    if on_ss_voices is not None:
+    # ── Super Saw ─────────────────────────────────────────────────────────────
+    super_saw_frame = tk.Frame(panel, bg=C_BG2)
+    super_saw_frame.pack(fill="x")
+    _make_subsection(super_saw_frame, "Super Saw")
+    ss_voices, ss_voices_label = _make_slider_row(
+        super_saw_frame, "Voices",
+        from_=2, to_=12, init=config.super_saw_voices,
+        command=None,
+        accent=C_VERDE, fmt="{:.0f}"
+    )
+    if on_ss_voices:
         ss_voices.config(command=lambda v: on_ss_voices(int(round(float(v))), ss_voices_label))
-    ss_voices.set(config.super_saw_voices)
-    ss_voices.grid(row=0, column=1)
-    super_saw_frame.grid(row=2, column=0, padx=5, pady=5, sticky='w')
 
-    frame.grid(row=0, column=0, sticky="ew", padx=5, pady=5)
+    # grid shim para compatibilidade com interface.py que faz .grid_remove()
+    pulse_frame.grid_propagate(False)
+    super_saw_frame.grid_propagate(False)
 
     return {
-        "frame": frame,
+        "frame": panel,
         "waveform_combo": waveform_combo,
         "pulse_frame": pulse_frame,
         "pulse_label": pulse_label,
@@ -67,58 +263,61 @@ def create_oscillator_controls(parent, config, on_waveform_change, on_pulse, on_
         "ss_voices": ss_voices,
     }
 
+
+# ─────────────────────────────────────────────────────────────────────────────
+#  Envelope ADSR
+# ─────────────────────────────────────────────────────────────────────────────
+
 def create_envelope_controls(parent, config, on_adsr_change, on_curve_change):
-    
     """
-    Cria e retorna os controles de envelope ADSR para a interface gráfica.
-
-    Esta função monta sliders para Attack, Decay, Sustain, Release e seleção do tipo de curva.
-
-    Parâmetros:
-        parent: Widget pai onde os controles serão inseridos.
-        config: Objeto de configuração do sintetizador.
-        on_adsr_change: Callback para alteração dos parâmetros ADSR.
-        on_curve_change: Callback para alteração do tipo de curva.
+    Cria o painel de Envelope ADSR com estética SelvaSonic.
 
     Retorna:
-        tuple: (frame, sliders, labels, curve_combo) com referências aos widgets criados.
+        (frame, sliders_dict, labels_dict, curve_combo)
     """
-    
-    frame = ttk.LabelFrame(parent, text="Envelope ADSR")
-    sliders = {}
-    labels = {}
+    frame = tk.Frame(parent, bg=C_BG2)
+    frame.pack(fill="both", expand=True)
+
+    _make_section_bar(frame, "Envelope ADSR")
 
     adsr_params = [
-        ('Attack', 0.0, 2.0, config.attack_time),
-        ('Decay', 0.0, 2.0, config.decay_time),
-        ('Sustain', 0.0, 1.0, config.sustain_level),
-        ('Release', 0.0, 2.0, config.release_time)
+        ("Attack",  "attack",  C_AMARELO,  0.0, 2.0,  config.attack_time),
+        ("Decay",   "decay",   C_VERDE,    0.0, 2.0,  config.decay_time),
+        ("Sustain", "sustain", C_AZUL,     0.0, 1.0,  config.sustain_level),
+        ("Release", "release", C_ROXO,     0.0, 2.0,  config.release_time),
     ]
 
-    for i, (name, min_val, max_val, init_val) in enumerate(adsr_params):
-        ttk.Label(frame, text=f"{name}:").grid(row=i, column=0, sticky="w", padx=5, pady=5)
-        label = ttk.Label(frame, text=f"{init_val:.2f}")
-        label.grid(row=i, column=2, sticky="e", padx=5, pady=5)
-        slider = ttk.Scale(
-            frame, from_=min_val, to=max_val,
-            command=lambda v, n=name.lower(), l=label: on_adsr_change(n, float(v), l)
+    sliders = {}
+    labels  = {}
+
+    for name, key, accent, mn, mx, init in adsr_params:
+        slider, lbl = _make_slider_row(
+            frame, name,
+            from_=mn, to_=mx, init=init,
+            command=lambda v, k=key, l=None: None,   # placeholder
+            accent=accent
         )
-        slider.set(init_val)
-        slider.grid(row=i, column=1, sticky="ew", padx=5, pady=5)
-        sliders[name.lower()] = slider
-        labels[name.lower()] = label
-        frame.rowconfigure(i, weight=1)
+        # Reconecta o command correto com a referência ao label real
+        slider.config(command=lambda v, k=key, l=lbl: on_adsr_change(k, float(v), l))
+        sliders[key] = slider
+        labels[key]  = lbl
 
-    # ADSR Curve Type
-    ttk.Label(frame, text="Curve Type:").grid(row=4, column=0, sticky="w", padx=5, pady=5)
-    curve_combo = ttk.Combobox(frame, values=['Linear', 'Exponential'], state="readonly")
-    curve_combo.set(config.adsr_curve.value.capitalize())
-    curve_combo.grid(row=4, column=1, sticky="ew", padx=5, pady=5)
-    curve_combo.bind('<<ComboboxSelected>>', on_curve_change)
+    # ── Curve Type ────────────────────────────────────────────────────────────
+    _make_subsection(frame, "Curva")
+    curve_combo = _make_combo_row(
+        frame, "Curve Type",
+        values=["Linear", "Exponential"],
+        init=config.adsr_curve.value.capitalize(),
+        command=on_curve_change,
+        accent=C_TEXTO2
+    )
 
-    frame.columnconfigure(1, weight=1)
-    frame.grid(row=0, column=0, sticky="ew", padx=5, pady=5)
     return frame, sliders, labels, curve_combo
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+#  Modulação / Filtros
+# ─────────────────────────────────────────────────────────────────────────────
 
 def create_modulation_controls(
     parent, config,
@@ -128,132 +327,98 @@ def create_modulation_controls(
     on_filter_type, on_filter_freq, on_filter_q
 ):
     """
-    Cria e retorna os controles de modulação e filtros para a interface gráfica.
-
-    Esta função monta sliders e combos para FM, harmônicos aditivos, LFO, HFO e filtros digitais.
-
-    Parâmetros:
-        parent: Widget pai onde os controles serão inseridos.
-        config: Objeto de configuração do sintetizador.
-        on_fm_freq: Callback para frequência FM.
-        on_fm_index: Callback para índice FM.
-        on_additive: Callback para harmônicos aditivos.
-        on_lfo_freq: Callback para frequência LFO.
-        on_lfo_depth: Callback para profundidade LFO.
-        on_lfo_target: Callback para alvo LFO.
-        on_hfo_freq: Callback para frequência HFO.
-        on_hfo_depth: Callback para profundidade HFO.
-        on_hfo_target: Callback para alvo HFO.
-        on_filter_type: Callback para tipo de filtro.
-        on_filter_freq: Callback para frequência de corte do filtro.
-        on_filter_q: Callback para Q do filtro.
+    Cria o painel de Modulação e Filtros com estética SelvaSonic.
 
     Retorna:
-        dict: Dicionário com referências aos widgets criados.
+        dict com todas as referências de widget necessárias para interface.py.
     """
-    frame = ttk.LabelFrame(parent, text="Modulação/Filtros")
+    panel = _panel(parent, scrollable=True)
 
-    # FM Frequency
-    ttk.Label(frame, text="FM Frequency:").grid(row=0, column=0, sticky="w", padx=5, pady=5)
-    fm_freq_label = ttk.Label(frame, text=f"{config.fm_mod_freq:.1f}")
-    fm_freq_label.grid(row=0, column=2, sticky="e", padx=5, pady=5)
-    fm_freq = ttk.Scale(frame, from_=0.1, to=5000, command=on_fm_freq)
-    fm_freq.set(config.fm_mod_freq)
-    fm_freq.grid(row=0, column=1, sticky="ew", padx=5, pady=5)
+    # ── FM ────────────────────────────────────────────────────────────────────
+    _make_section_bar(panel, "Modulação FM")
 
-    # FM Index
-    ttk.Label(frame, text="FM Index:").grid(row=1, column=0, sticky="w", padx=5, pady=5)
-    fm_index_label = ttk.Label(frame, text=f"{config.fm_mod_index:.2f}")
-    fm_index_label.grid(row=1, column=2, sticky="e", padx=5, pady=5)
-    fm_index = ttk.Scale(frame, from_=0, to=10, command=on_fm_index)
-    fm_index.set(config.fm_mod_index)
-    fm_index.grid(row=1, column=1, sticky="ew", padx=5, pady=5)
+    fm_freq, fm_freq_label = _make_slider_row(
+        panel, "FM Frequency",
+        from_=0.1, to_=5000, init=config.fm_mod_freq,
+        command=on_fm_freq, accent=C_AMARELO, fmt="{:.1f}"
+    )
+    fm_index, fm_index_label = _make_slider_row(
+        panel, "FM Index",
+        from_=0, to_=10, init=config.fm_mod_index,
+        command=on_fm_index, accent=C_AMARELO, fmt="{:.2f}"
+    )
+    additive_scale, additive_label = _make_slider_row(
+        panel, "Add. Harmonics",
+        from_=1, to_=16, init=config.additive_harmonics,
+        command=on_additive, accent=C_VERDE, fmt="{:.0f}"
+    )
 
-    # Additive Harmonics
-    ttk.Label(frame, text="Additive Harmonics:").grid(row=2, column=0, sticky="w", padx=5, pady=5)
-    additive_label = ttk.Label(frame, text=str(config.additive_harmonics))
-    additive_label.grid(row=2, column=2, sticky="e", padx=5, pady=5)
-    additive_scale = ttk.Scale(frame, from_=1, to=16, command=on_additive)
-    additive_scale.set(config.additive_harmonics)
-    additive_scale.grid(row=2, column=1, sticky="ew", padx=5, pady=5)
+    # ── LFO ───────────────────────────────────────────────────────────────────
+    _make_section_bar(panel, "LFO", accent=C_AZUL)
 
-    # LFO
-    ttk.Label(frame, text="LFO Freq:").grid(row=3, column=0, sticky="w", padx=5, pady=5)
-    lfo_freq_label = ttk.Label(frame, text=f"{config.lfo_freq:.2f} Hz")
-    lfo_freq_label.grid(row=3, column=2, sticky="e", padx=5, pady=5)
-    lfo_freq = ttk.Scale(frame, from_=0.1, to=20.0, command=on_lfo_freq)
-    lfo_freq.set(config.lfo_freq)
-    lfo_freq.grid(row=3, column=1, sticky="ew", padx=5, pady=5)
+    lfo_freq, lfo_freq_label = _make_slider_row(
+        panel, "LFO Freq",
+        from_=0.1, to_=20.0, init=config.lfo_freq,
+        command=on_lfo_freq, accent=C_AZUL, fmt="{:.2f} Hz"
+    )
+    lfo_depth, lfo_depth_label = _make_slider_row(
+        panel, "LFO Depth",
+        from_=0.0, to_=1.0, init=config.lfo_depth,
+        command=on_lfo_depth, accent=C_AZUL, fmt="{:.2f}"
+    )
+    lfo_target = _make_combo_row(
+        panel, "LFO Target",
+        values=["pitch", "pulse"],
+        init=config.lfo_target,
+        command=on_lfo_target, accent=C_AZUL
+    )
 
-    ttk.Label(frame, text="LFO Depth:").grid(row=4, column=0, sticky="w", padx=5, pady=5)
-    lfo_depth_label = ttk.Label(frame, text=f"{config.lfo_depth:.2f}")
-    lfo_depth_label.grid(row=4, column=2, sticky="e", padx=5, pady=5)
-    lfo_depth = ttk.Scale(frame, from_=0.0, to=1.0, command=on_lfo_depth)
-    lfo_depth.set(config.lfo_depth)
-    lfo_depth.grid(row=4, column=1, sticky="ew", padx=5, pady=5)
+    # ── HFO ───────────────────────────────────────────────────────────────────
+    _make_section_bar(panel, "HFO", accent=C_ROXO)
 
-    ttk.Label(frame, text="LFO Target:").grid(row=5, column=0, sticky="w", padx=5, pady=5)
-    lfo_target = ttk.Combobox(frame, values=["pitch", "pulse"])
-    lfo_target.set(config.lfo_target)
-    lfo_target.grid(row=5, column=1, sticky="ew", padx=5, pady=5)
-    lfo_target.bind('<<ComboboxSelected>>', on_lfo_target)
+    hfo_freq, hfo_freq_label = _make_slider_row(
+        panel, "HFO Freq",
+        from_=20, to_=8000, init=config.hfo_freq,
+        command=on_hfo_freq, accent=C_ROXO, fmt="{:.1f} Hz"
+    )
+    hfo_depth, hfo_depth_label = _make_slider_row(
+        panel, "HFO Depth",
+        from_=0.0, to_=1.0, init=config.hfo_depth,
+        command=on_hfo_depth, accent=C_ROXO, fmt="{:.2f}"
+    )
+    hfo_target = _make_combo_row(
+        panel, "HFO Target",
+        values=["pitch"],
+        init=config.hfo_target,
+        command=on_hfo_target, accent=C_ROXO
+    )
 
-    # HFO
-    ttk.Label(frame, text="HFO Freq:").grid(row=6, column=0, sticky="w", padx=5, pady=5)
-    hfo_freq_label = ttk.Label(frame, text=f"{config.hfo_freq:.1f} Hz")
-    hfo_freq_label.grid(row=6, column=2, sticky="e", padx=5, pady=5)
-    hfo_freq = ttk.Scale(frame, from_=20, to=8000, command=on_hfo_freq)
-    hfo_freq.set(config.hfo_freq)
-    hfo_freq.grid(row=6, column=1, sticky="ew", padx=5, pady=5)
+    # ── Filtro ────────────────────────────────────────────────────────────────
+    _make_section_bar(panel, "Filtro", accent=C_VERMELHO)
 
-    ttk.Label(frame, text="HFO Depth:").grid(row=7, column=0, sticky="w", padx=5, pady=5)
-    hfo_depth_label = ttk.Label(frame, text=f"{config.hfo_depth:.2f}")
-    hfo_depth_label.grid(row=7, column=2, sticky="e", padx=5, pady=5)
-    hfo_depth = ttk.Scale(frame, from_=0.0, to=1.0, command=on_hfo_depth)
-    hfo_depth.set(config.hfo_depth)
-    hfo_depth.grid(row=7, column=1, sticky="ew", padx=5, pady=5)
+    filter_frame = tk.Frame(panel, bg=C_BG2)
+    filter_frame.pack(fill="x")
 
-    ttk.Label(frame, text="HFO Target:").grid(row=8, column=0, sticky="w", padx=5, pady=5)
-    hfo_target = ttk.Combobox(frame, values=["pitch"])
-    hfo_target.set(config.hfo_target)
-    hfo_target.grid(row=8, column=1, sticky="ew", padx=5, pady=5)
-    hfo_target.bind('<<ComboboxSelected>>', on_hfo_target)
+    filter_type = _make_combo_row(
+        filter_frame, "Type",
+        values=["lowpass", "highpass", "bandpass"],
+        init=config.filter_type,
+        command=on_filter_type, accent=C_VERMELHO
+    )
+    filter_freq, filter_freq_label = _make_slider_row(
+        filter_frame, "Cutoff (Hz)",
+        from_=1, to_=config.sample_rate // 2 - 1,
+        init=config.filter_freq,
+        command=on_filter_freq, accent=C_VERMELHO, fmt="{:.0f}"
+    )
+    filter_q, filter_q_label = _make_slider_row(
+        filter_frame, "Q",
+        from_=0.1, to_=10.0, init=config.filter_q,
+        command=on_filter_q, accent=C_VERMELHO, fmt="{:.2f}"
+    )
 
-    # FILTER
-    filter_frame = ttk.LabelFrame(frame, text="Filter")
-    filter_frame.grid(row=9, column=0, columnspan=3, pady=10, sticky='ew')
-    filter_frame.columnconfigure(1, weight=1)
-
-    ttk.Label(filter_frame, text="Type:").grid(row=0, column=0, sticky="w", padx=5, pady=5)
-    filter_type = ttk.Combobox(filter_frame, values=["lowpass", "highpass", "bandpass"])
-    filter_type.set(config.filter_type)
-    filter_type.grid(row=0, column=1, sticky="ew", padx=5, pady=5)
-    filter_type.bind("<<ComboboxSelected>>", on_filter_type)
-
-    ttk.Label(filter_frame, text="Cutoff (Hz):").grid(row=1, column=0, sticky="w", padx=5, pady=5)
-    filter_freq_label = ttk.Label(filter_frame, text=f"{config.filter_freq:.0f}")
-    filter_freq_label.grid(row=1, column=2, sticky="e", padx=5, pady=5)
-    filter_freq = ttk.Scale(filter_frame, from_=1, to=config.sample_rate//2 - 1, command=on_filter_freq)
-    filter_freq.set(config.filter_freq)
-    filter_freq.grid(row=1, column=1, sticky="ew", padx=5, pady=5)
-
-    ttk.Label(filter_frame, text="Q:").grid(row=2, column=0, sticky="w", padx=5, pady=5)
-    filter_q_label = ttk.Label(filter_frame, text=f"{config.filter_q:.2f}")
-    filter_q_label.grid(row=2, column=2, sticky="e", padx=5, pady=5)
-    filter_q = ttk.Scale(filter_frame, from_=0.1, to=10.0, command=on_filter_q)
-    filter_q.set(config.filter_q)
-    filter_q.grid(row=2, column=1, sticky="ew", padx=5, pady=5)
-
-    # Expansão das colunas para sliders
-    for i in range(10):
-        frame.rowconfigure(i, weight=1)
-    frame.columnconfigure(1, weight=1)
-
-    frame.grid(row=0, column=0, sticky="nsew", padx=5, pady=5)
-
-    # Retorne todos os widgets relevantes para binds e updates
     return {
-        "frame": frame,
+        "frame": panel,
         "fm_freq": fm_freq, "fm_freq_label": fm_freq_label,
         "fm_index": fm_index, "fm_index_label": fm_index_label,
         "additive_scale": additive_scale, "additive_label": additive_label,
@@ -266,77 +431,107 @@ def create_modulation_controls(
         "filter_type": filter_type,
         "filter_freq": filter_freq, "filter_freq_label": filter_freq_label,
         "filter_q": filter_q, "filter_q_label": filter_q_label,
-        "filter_frame": filter_frame
+        "filter_frame": filter_frame,
     }
 
-def create_system_controls(parent, config, on_sample_rate, on_buffer_size, on_polyphony, on_save, on_load, on_wavetable):
-    frame = ttk.LabelFrame(parent, text="Sistema")
 
+# ─────────────────────────────────────────────────────────────────────────────
+#  Sistema
+# ─────────────────────────────────────────────────────────────────────────────
+
+def create_system_controls(
+    parent, config,
+    on_sample_rate, on_buffer_size, on_polyphony,
+    on_save, on_load, on_wavetable
+):
     """
-    Cria e retorna os controles de sistema para a interface gráfica.
-
-    Esta função monta controles para seleção de dispositivo MIDI, polifonia, sample rate, buffer size e botões de salvar/carregar configuração.
-
-    Parâmetros:
-        parent: Widget pai onde os controles serão inseridos.
-        config: Objeto de configuração do sintetizador.
-        on_sample_rate: Callback para alteração do sample rate.
-        on_buffer_size: Callback para alteração do buffer size.
-        on_polyphony: Callback para alteração da polifonia máxima.
-        on_save: Callback para salvar configuração.
-        on_load: Callback para carregar configuração.
-        on_wavetable: Callback para carregar wavetable.
+    Cria o painel de Sistema com estética SelvaSonic.
 
     Retorna:
-        dict: Dicionário com referências aos widgets criados.
+        dict com: frame, midi_devices, polyphony, polyphony_label,
+                  sample_rate, buffer_size.
     """
+    panel = _panel(parent)
 
-    # MIDI Devices (opcional, se usar mido)
+    _make_section_bar(panel, "Sistema")
+
+    # ── MIDI Input ────────────────────────────────────────────────────────────
     try:
         import mido
         midi_inputs = mido.get_input_names()
     except ImportError:
         midi_inputs = []
-    ttk.Label(frame, text="MIDI Input:").grid(row=0, column=0)
-    midi_devices = ttk.Combobox(frame, values=midi_inputs, state="readonly")
-    midi_devices.grid(row=0, column=1)
 
-    # Polyphony
-    ttk.Label(frame, text="Max Polyphony:").grid(row=1, column=0)
-    polyphony_label = ttk.Label(frame, text=str(config.max_polyphony))
-    polyphony_label.grid(row=1, column=2)
-    polyphony = ttk.Scale(frame, from_=1, to=64, command=lambda v: on_polyphony(v, polyphony_label))
-    polyphony.set(config.max_polyphony)
-    polyphony.grid(row=1, column=1)
+    midi_devices = _make_combo_row(
+        panel, "MIDI Input",
+        values=midi_inputs or ["— nenhum —"],
+        init=midi_inputs[0] if midi_inputs else "— nenhum —",
+        accent=C_AMARELO
+    )
 
-    # Wavetable Loader
-    ttk.Button(frame, text="Load Wavetable", command=on_wavetable).grid(row=2, column=0)
+    # ── Polifonia ─────────────────────────────────────────────────────────────
+    polyphony, polyphony_label = _make_slider_row(
+        panel, "Max Poliphony",
+        from_=1, to_=64, init=config.max_polyphony,
+        command=lambda v: on_polyphony(v, polyphony_label),
+        accent=C_VERDE, fmt="{:.0f}"
+    )
 
-     # Sample Rate
-    ttk.Label(frame, text="Sample Rate (Hz):").grid(row=3, column=0)
-    sample_rate = ttk.Combobox(frame, values=[22050, 32000, 44100, 48000, 96000], state="readonly")
-    sample_rate.set(config.sample_rate)
-    sample_rate.grid(row=3, column=1)
-    # Chame o callback apenas com o evento (ou sem argumentos, se preferir)
-    sample_rate.bind('<<ComboboxSelected>>', on_sample_rate)
+    # ── Load Wavetable ────────────────────────────────────────────────────────
+    _make_subsection(panel, "Wavetable")
+    btn_row = tk.Frame(panel, bg=C_BG2)
+    btn_row.pack(fill="x", padx=10, pady=4)
+    _styled_button(btn_row, "▲  Load Wavetable", on_wavetable, accent=C_VERDE).pack(side="left")
 
-    # Buffer Size
-    ttk.Label(frame, text="Buffer Size:").grid(row=4, column=0)
-    buffer_size = ttk.Combobox(frame, values=[32, 64, 128, 256, 512], state="readonly")
-    buffer_size.set(config.buffer_size)
-    buffer_size.grid(row=4, column=1)
-    buffer_size.bind('<<ComboboxSelected>>', on_buffer_size)
+    # ── Sample Rate ───────────────────────────────────────────────────────────
+    _make_subsection(panel, "Hardware")
+    sample_rate = _make_combo_row(
+        panel, "Sample Rate (Hz)",
+        values=[22050, 32000, 44100, 48000, 96000],
+        init=config.sample_rate,
+        command=on_sample_rate, accent=C_AMARELO
+    )
+    buffer_size = _make_combo_row(
+        panel, "Buffer Size",
+        values=[32, 64, 128, 256, 512],
+        init=config.buffer_size,
+        command=on_buffer_size, accent=C_AMARELO
+    )
 
-    # Config buttons
-    ttk.Button(frame, text="Salvar Configuração", command=lambda: on_save()).grid(row=5, column=0, pady=10)
-    ttk.Button(frame, text="Carregar Configuração", command=lambda: on_load()).grid(row=5, column=1, pady=10)
+    # ── Salvar / Carregar ─────────────────────────────────────────────────────
+    _make_subsection(panel, "Configuração")
+    cfg_row = tk.Frame(panel, bg=C_BG2)
+    cfg_row.pack(fill="x", padx=10, pady=6)
+    _styled_button(cfg_row, "↓  Salvar", on_save, accent=C_AMARELO).pack(side="left", padx=(0, 8))
+    _styled_button(cfg_row, "↑  Carregar", on_load, accent=C_TEXTO2).pack(side="left")
 
-    frame.grid(row=0, column=0, sticky="ew", padx=5, pady=5)
     return {
-        "frame": frame,
+        "frame": panel,
         "midi_devices": midi_devices,
         "polyphony": polyphony,
         "polyphony_label": polyphony_label,
         "sample_rate": sample_rate,
-        "buffer_size": buffer_size
+        "buffer_size": buffer_size,
     }
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+#  Botão estilizado (helper interno)
+# ─────────────────────────────────────────────────────────────────────────────
+
+def _styled_button(parent, text, command, accent=C_AMARELO):
+    """Botão com borda esquerda colorida e hover amarelo/preto."""
+    btn = tk.Button(
+        parent, text=text.upper(),
+        command=command,
+        font=("Helvetica", 8, "bold"),
+        bg=C_BG3, fg=C_TEXTO,
+        activebackground=accent, activeforeground=C_PRETO,
+        relief="flat",
+        bd=0,
+        padx=12, pady=5,
+        highlightthickness=2,
+        highlightbackground=accent,
+        cursor="hand2"
+    )
+    return btn
