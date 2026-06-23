@@ -49,43 +49,119 @@ class FullSynthInterface:
         synth: Instância do sintetizador MIDI.
         keyboard_midi: Instância do teclado MIDI virtual.
     """
-    def __init__(self, master):
-        """
-        Inicializa a interface gráfica do sintetizador.
-
-        Parâmetros:
-            master: Instância principal do Tkinter.
-        """
+    def __init__(self, master, synth):
         self.master = master
-        self.master.title("Advanced Synth Controller")
-        self.master.geometry("1000x800")
-        self.master.rowconfigure(0, weight=1)
-        self.master.columnconfigure(0, weight=1)
+        self.synth = synth
+        self.visual_update_id = None
+        self.config = synth.config
+        
+        self.visual_paused = False
+        self.last_keycode = None
+        self.pressed_notes = set()
 
-        # Frame principal para organizar notebook e canvas
-        self.main_frame = ttk.Frame(self.master)
-        self.main_frame.grid(row=0, column=0, sticky="nsew")
-        self.main_frame.rowconfigure(0, weight=1)  # notebook cresce
-        self.main_frame.rowconfigure(1, weight=0)  # canvas não cresce
-        self.main_frame.columnconfigure(0, weight=1)
-
-        self.config = SynthConfig()
-        self.synth = MidiSynth()
+        # Inicia teclado
         self.keyboard_midi = KeyboardMIDI(self.synth, self.master)
 
-        self.visual_update_id = None
-        self.setup_visuals()
-        self.synth.start()
+        # 1. Aplica o CSS
+        self.setup_styles()
+        
+        # 2. Desenha o Header (Gradiente e Logo)
+        self.create_header()
 
+        # 3. Cria o container principal do meio da tela
+        self.main_frame = ttk.Frame(self.master)
+        self.main_frame.grid(row=1, column=0, sticky="nsew", padx=10, pady=10)
+        self.master.rowconfigure(1, weight=1)
+        self.master.columnconfigure(0, weight=1)
+
+        # 4. Criação das Abas, Controles e Gráfico...
         self.create_widgets()
-        self.setup_bindings()
-        self.current_waveform = self.config.default_waveform
         self.setup_visuals()
-        self.synth.start()
-
+        self.setup_bindings()
+        
+        self.current_waveform = self.config.default_waveform
         self.create_keyboard_help()
+
+        self.update_visuals()
+        self.synth.start()
         self.keyboard_midi.start()
+
+    def setup_styles(self):
+        """
+        Aplica a estética do protótipo HTML (Brasil + Jamaica) ao Tkinter.
+        """
+        style = ttk.Style()
+        style.theme_use('clam')
+
+        # Variáveis CSS do seu protótipo
+        self.c_amarelo = "#F5C800"
+        self.c_verde = "#1A7A2E"
+        self.c_marrom = "#5C3317"
+        self.c_azul = "#1B4FD8"
+        self.c_vermelho = "#C8281E"
+        self.c_preto = "#0A0A0A"
+        self.c_bg = "#111111"
+        self.c_bg2 = "#1A1A1A"
+        self.c_bg3 = "#222222"
+        self.c_texto = "#E8E0C8"
+        self.c_texto2 = "#A09880"
+
+        # Fundo geral do app
+        self.master.configure(bg=self.c_bg)
+
+        # Frames e Painéis
+        style.configure('TFrame', background=self.c_bg)
+        style.configure('Panel.TFrame', background=self.c_bg2)
+        style.configure('TLabelframe', background=self.c_bg2, bordercolor=self.c_marrom, borderwidth=1)
+        style.configure('TLabelframe.Label', background=self.c_bg2, foreground=self.c_amarelo, font=("Helvetica", 11, "bold"))
+
+        # Abas (Notebook)
+        style.configure('TNotebook', background=self.c_bg, borderwidth=0)
+        style.configure('TNotebook.Tab', background=self.c_preto, foreground=self.c_texto2, padding=[20, 5], font=("Helvetica", 10, "bold"))
+        style.map('TNotebook.Tab', 
+                  background=[('selected', self.c_amarelo)], 
+                  foreground=[('selected', self.c_preto)])
+
+        # Textos e Labels
+        style.configure('TLabel', background=self.c_bg2, foreground=self.c_texto, font=("Helvetica", 9))
+        
+        # Sliders
+        style.configure('Horizontal.TScale', background=self.c_bg2, troughcolor=self.c_bg3, borderwidth=1, bordercolor=self.c_marrom)
+
+        # Botões
+        style.configure('TButton', background=self.c_bg3, foreground=self.c_texto, borderwidth=1, bordercolor=self.c_marrom, font=("Helvetica", 9, "bold"))
+        style.map('TButton', 
+                  background=[('active', self.c_amarelo)], 
+                  foreground=[('active', self.c_preto)])
+
+        # Combobox
+        style.configure('TCombobox', fieldbackground=self.c_bg3, background=self.c_bg3, foreground=self.c_texto, bordercolor=self.c_marrom)
     
+    def create_header(self):
+        """
+        Cria o topo da aplicação usando grid (compatível com o resto da interface).
+        """
+        # Criamos um Frame para o Header para que ele fique isolado
+        header_frame = ttk.Frame(self.master)
+        header_frame.grid(row=0, column=0, sticky="ew", padx=10, pady=10)
+        
+        # O Canvas agora fica dentro desse Frame
+        header = tk.Canvas(header_frame, height=50, bg=self.c_preto, highlightthickness=0)
+        header.pack(fill="x") # pack aqui é seguro pois está dentro de um frame que usa grid
+
+        # Desenho do gradiente e logo...
+        w = 1000 
+        header.create_rectangle(0, 0, w*0.25, 3, fill=self.c_amarelo, outline="")
+        header.create_rectangle(w*0.25, 0, w*0.5, 3, fill=self.c_verde, outline="")
+        header.create_rectangle(w*0.5, 0, w*0.75, 3, fill=self.c_azul, outline="")
+        header.create_rectangle(w*0.75, 0, w, 3, fill=self.c_vermelho, outline="")
+
+        header.create_text(20, 25, text="SELVA", fill=self.c_amarelo, font=("Helvetica", 18, "bold"), anchor="w")
+        header.create_text(90, 25, text="SONIC", fill=self.c_verde, font=("Helvetica", 18, "bold"), anchor="w")
+        
+        header.create_rectangle(200, 15, 270, 35, fill="#0a2a12", outline=self.c_verde)
+        header.create_text(210, 25, text="● AO VIVO", fill=self.c_verde, font=("Courier", 9, "bold"), anchor="w")
+
     def update_controls_from_config(self):
         """
         Atualiza os controles da interface gráfica com base na configuração atual do sintetizador.
@@ -275,7 +351,7 @@ class FullSynthInterface:
         self.ss_voices.config(command=lambda v: [
         update_ss_voices(self.config, v, self.ss_voices_label),
         self.synth.set_supersaw_voices(v),
-        self.update_visuals()  # <-- Adicione esta linha
+        self.update_visuals()  
         ])
 
         self.osc_frame.grid(row=0, column=0, sticky="nsew")
@@ -287,8 +363,8 @@ class FullSynthInterface:
             lambda param, v, lbl: [update_adsr(self.config, param, v, lbl), self.update_adsr_param(param, v)],
             lambda e: update_adsr_curve(self.config, curve_combo)
         )
-        env_frame.rowconfigure(0, weight=1)      # <-- Adicione aqui
-        env_frame.columnconfigure(0, weight=1)   # <-- Adicione aqui
+        env_frame.rowconfigure(0, weight=1)      
+        env_frame.columnconfigure(0, weight=1)   
         env_frame.grid(row=0, column=0, sticky="nsew")
         notebook.add(env_frame, text="Envelope (ADSR)")
         self.env_frame = env_frame
@@ -543,74 +619,84 @@ class FullSynthInterface:
             print(f"Erro ao reiniciar stream de áudio: {e}")
 
     def setup_visuals(self):
-        """
-        Configura a visualização da forma de onda.
+            self.fig, self.ax = plt.subplots(figsize=(8, 2), facecolor='#0A0A0A')
+            self.ax.set_facecolor('#0A0A0A')
+            
+            # Pinta a borda de baixo de amarelo, e esconde as outras
+            self.ax.spines['bottom'].set_color('#F5C800')
+            self.ax.spines['top'].set_visible(False)
+            self.ax.spines['right'].set_visible(False)
+            self.ax.spines['left'].set_visible(False)
+                    
+            # Remove os números dos eixos e esconde os ticks
+            self.ax.set_xticks([])
+            self.ax.set_yticks([])
 
-        Notas:
-            - Cria o canvas do matplotlib e o botão de pausar/retomar visualização.
-        """
-        self.fig, self.ax = plt.subplots(figsize=(8, 3))
-        self.canvas = FigureCanvasTkAgg(self.fig, master=self.main_frame)
-        self.canvas.get_tk_widget().grid(row=1, column=0, sticky="ew")
+            self.canvas = FigureCanvasTkAgg(self.fig, master=self.main_frame)
+            self.canvas.get_tk_widget().grid(row=1, column=0, sticky="ew", padx=10, pady=10)
 
-        self.visual_paused = False
-        self.pause_button = ttk.Button(self.master, text="⏸ Pausar Visualização", command=self.toggle_visual)
-        self.pause_button.grid(row=3, column=0, pady=5, sticky="ew")
+            # Resto do seu código original (botão de pause, etc...)
+            self.visual_paused = False
+            self.pause_button = ttk.Button(self.master, text="⏸ Pausar Visualização", command=self.toggle_visual)
+            self.pause_button.grid(row=3, column=0, pady=5, padx=10, sticky="ew")
 
-        self.start_visual_updates()
+            self.start_visual_updates()
 
     def update_visuals(self):
         """
-        Atualiza periodicamente a visualização da forma de onda no gráfico da interface.
-
-        Esta função obtém o último buffer de áudio gerado em tempo real pelo motor de síntese 
-        (através do atributo `config.last_audio_buffer`). Ela extrai o canal esquerdo do sinal 
-        estéreo e atualiza o plot do Matplotlib. Caso não existam vozes ativas, a atualização 
-        esteja pausada ou o buffer ainda não tenha sido populado, a função renderiza uma onda 
-        estática de referência (modo estático/pausado).
-
-        Notas:
-            - Esta abordagem desacopla 100% o cálculo de DSP da Thread principal da UI, 
-              eliminando travamentos e gargalos de uso de CPU.
-            - Agenda a sua próxima execução recursiva automaticamente após 100ms via `self.master.after`.
-            - Consome o buffer de saída real da placa de som, garantindo fidelidade visual absoluta.
+        Atualiza a visualização da onda com custo de CPU ultrabaixo, 
+        incluindo efeito de preenchimento (fill) abaixo da linha.
         """
-        # Se a visualização estiver pausada pelo usuário, mantém o laço vivo mas pula a renderização
         if getattr(self, 'visual_paused', False):
-            self.master.after(100, self.update_visuals)
-            return
-
-        buffer = self.synth.config.last_audio_buffer
-        
-        # Se não há som ou o motor ainda não gerou o buffer, desenha o modo estático
-        if buffer is None or not self.synth.voice_manager.get_voices():
-            t = np.linspace(0, 0.03, 500)
-            phase = 2 * np.pi * 440 * t
-            wave = generate_static_wave(phase, self.config)
-            update_waveform_plot(self.ax, t, wave, title="Waveform Preview (Modo Estático)")
-            self.canvas.draw()
-            
-            # Reagenda o próximo frame e sai da função
-            self.master.after(100, self.update_visuals)
+            self.visual_update_id = self.master.after(50, self.update_visuals)
             return
 
         try:
-            # Tenta pegar o buffer mais recente sem travar a thread da UI
-            buffer = visual_queue.get_nowait()
+            from synth.audio import visual_queue
             
-            # Desenha o gráfico (como já fizemos antes)
-            mix = buffer[:, 0]
-            duration = len(mix) / self.config.sample_rate
-            t = np.linspace(0, duration, len(mix))
-            update_waveform_plot(self.ax, t, mix, title="Waveform Preview (Ao Vivo)")
-            self.canvas.draw()
+            # Pega o buffer mais recente e descarta os antigos
+            buffer = None
+            while not visual_queue.empty():
+                buffer = visual_queue.get_nowait()
             
-        except Empty:
-            # Se a fila estiver vazia, apenas mantemos o gráfico atual ou desenhamos o estático
-            pass 
+            if buffer is not None:
+                # 1. DOWNSAMPLING: Pega apenas 1 a cada 4 frames
+                mix = buffer[::4, 0] 
+                mix = np.clip(mix, -1.0, 1.0)
 
-        # Reagenda para 50ms para manter a fluidez
-        self.master.after(50, self.update_visuals)
+                # 2. RENDERIZAÇÃO DE ALTA PERFORMANCE
+                if not hasattr(self, 'wave_line') or self.wave_line is None:
+                    self.ax.clear()
+                    
+                    # Calcula o eixo de tempo e guarda na classe para reutilizar (micro-otimização)
+                    duration = len(mix) / (self.config.sample_rate / 4)
+                    self.t_axis = np.linspace(0, duration, len(mix))
+                    
+                    self.wave_line, = self.ax.plot(self.t_axis, mix, color='#1A7A2E', linewidth=2.0)
+                    self.wave_fill = self.ax.fill_between(self.t_axis, mix, 0, color='#1A7A2E', alpha=0.3)
+                    
+                    self.ax.set_ylim(-1.1, 1.1)
+                    self.ax.set_title("▶ Waveform Preview (Ao Vivo)", color='#1A7A2E', fontweight='bold', loc='left')
+                    self.canvas.draw()
+                else:
+                    # Atualiza a posição Y da linha instantaneamente
+                    self.wave_line.set_ydata(mix)
+                    
+                    # Para o preenchimento, o Matplotlib não tem set_ydata. 
+                    # Truque: Removemos apenas a sombra antiga da memória e criamos uma nova.
+                    if hasattr(self, 'wave_fill') and self.wave_fill in self.ax.collections:
+                        self.wave_fill.remove()
+                    
+                    self.wave_fill = self.ax.fill_between(self.t_axis, mix, 0, color='cyan', alpha=0.3)
+                    
+                    # Pede para a placa de vídeo redesenhar quando tiver tempo livre
+                    self.canvas.draw_idle()
+
+        except Exception as e:
+            pass # Ignora erros visuais para não derrubar o motor de áudio
+
+        # Reagenda para 50ms (~20 FPS)
+        self.visual_update_id = self.master.after(50, self.update_visuals)
 
     def start_visual_updates(self):
         """
@@ -627,7 +713,9 @@ class FullSynthInterface:
                 return
             try:
                 if not self.visual_paused:
-                    self.update_visuals()
+                    self.update_visuals() 
+                    pass
+                
             except Exception as e:
                 print(f"Erro na atualização visual: {e}")
             finally:

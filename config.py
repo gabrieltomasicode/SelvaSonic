@@ -4,6 +4,7 @@ import numpy as np
 from typing import Optional
 from .wavetables import generate_bandlimited_tables 
 
+_WAVETABLES_CACHE = None
 
 class WaveType(Enum):
     """
@@ -113,16 +114,22 @@ class SynthConfig:
     filter_q: float = 0.707      # Valor padrão (Butterworth), não ressonante.
     wavetable: np.ndarray = None
     bandlimited_tables: dict = field(default_factory=dict)
-    last_audio_buffer: np.ndarray = None
+    last_audio_buffer: Optional[np.ndarray] = None
 
     def __post_init__(self):
         """
         Método especial executado automaticamente após a classe ser instanciada.
         Ele injeta o banco de ondas no momento do boot do sintetizador.
         """
-        if not self.bandlimited_tables:
-            # Passamos o sample_rate atual para garantir que o Nyquist seja calculado corretamente
-            self.bandlimited_tables = generate_bandlimited_tables(self.sample_rate)
+        global _WAVETABLES_CACHE
+
+        # Se for a primeira vez que o ecossistema SelvaSonic roda:
+        if _WAVETABLES_CACHE is None:
+            # Ele calcula e guarda na variável global do sistema
+            _WAVETABLES_CACHE = generate_bandlimited_tables(self.sample_rate)
+            
+        # Todas as instâncias passam a apenas APONTAR para o mesmo cache na memória RAM
+        self.bandlimited_tables = _WAVETABLES_CACHE
 
     def validate(self):
         """
