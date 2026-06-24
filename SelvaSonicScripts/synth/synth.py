@@ -86,35 +86,74 @@ class MidiSynth:
         self.running = False
         print("⏹️ Sintetizador parado.")
     
-    def note_on(self, note: int, velocity: float):
+    def on_press(self, event):
         """
-        Aciona uma nota no sintetizador.
+        Manipula o evento de tecla pressionada.
 
         Parâmetros:
-            note (int): Número da nota MIDI.
-            velocity (float): Intensidade da nota (0.0 a 1.0).
+            event: Evento do Tkinter contendo informações da tecla pressionada.
 
         Notas:
-            - Calcula a frequência correspondente e ativa a voz.
-            - Exibe informações da nota no console.
+            - Permite mudança de oitava com '-' e '='.
+            - Aciona nota MIDI correspondente se válida e ainda não pressionada.
         """
+        # Ignora auto-repeat baseado em keycode
+        if event.keycode == self.last_keycode:
+            return
+        self.last_keycode = event.keycode
+
+        key = event.char.lower() if event.char else ""
+        if key == '-':
+            self.octave_offset = max(-48, self.octave_offset - 12)
+            return
+        elif key == '=':
+            self.octave_offset = min(48, self.octave_offset + 12)
+            return
+
+        note_info = self.key_to_note.get(key)
+        if isinstance(note_info, int):
+            note = note_info + self.octave_offset
+            if 0 <= note <= 127 and note not in self.pressed_notes:
+                self.pressed_notes.add(note)
+                
+                velocity = 0.70
+                # Utiliza a sua função modularizada para descobrir a frequência
+                freq = note_to_freq(note)
+                
+                # Aciona o sintetizador
+                self.synth.note_on(note, velocity)
+                
+                # O seu log de terminal idêntico ao da imagem
+                print(f"Nota ligada: {note} freq: {freq:.2f}Hz vel: {velocity:.2f}")
+                
+                # Dispara o gatilho visual para o cabeçalho da Interface Gráfica
+                if hasattr(self, 'status_callback') and self.status_callback:
+                    self.status_callback(is_on=True, note=note, freq=freq, velocity=velocity)
+
+    def note_on(self, note: int, velocity: float):
+        """
+        Ponte: Recebe a nota da Interface/Teclado, calcula a frequência 
+        usando a função nativa e delega para o VoiceManager.
+        """
+        # 1. Utiliza a sua função modularizada existente
         freq = note_to_freq(note)
-        self.voice_manager.note_on(note, velocity, freq, self.get_time)
-        print(f"Nota ligada: {note} freq: {freq:.2f}Hz vel: {velocity:.2f}")
+            
+        # 2. Chama o método note_on do Especialista em Vozes (VoiceManager)
+        if hasattr(self, 'voice_manager'):
+            self.voice_manager.note_on(note, velocity, freq, self.get_time)
+                
+            # Mantemos o log de terminal idêntico ao que você já tinha criado
+            print(f"Nota ligada: {note} freq: {freq:.2f}Hz vel: {velocity:.2f}")
 
     def note_off(self, note: int):
         """
-        Encerra uma nota no sintetizador.
-
-        Parâmetros:
-            note (int): Número da nota MIDI.
-
-        Notas:
-            - Libera a voz correspondente.
-            - Exibe informações da nota no console.
+        Ponte: Recebe o comando de soltar a tecla e delega para o VoiceManager.
         """
-        self.voice_manager.note_off(note, self.get_time)
-        print(f"Nota desligada: {note}")
+        if hasattr(self, 'voice_manager'):
+            self.voice_manager.note_off(note, self.get_time)
+            
+            # Log de encerramento da nota
+            print(f"Nota desligada: {note}")
     
     def on_close(self):
         """

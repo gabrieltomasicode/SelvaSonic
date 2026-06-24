@@ -1,35 +1,48 @@
 import os
 import shutil
+import stat
 
-def remove_pycache_and_pyc(root_dir):
+def handle_remove_readonly(func, path, exc_info):
     """
-    Remove todas as pastas __pycache__ e arquivos .pyc recursivamente a partir do diretório informado.
-
-    Args:
-        root_dir (str): Caminho do diretório raiz para iniciar a limpeza.
-
-    Notas:
-        - Remove diretórios __pycache__ inteiros.
-        - Remove arquivos .pyc encontrados em qualquer subpasta.
-        - Exibe mensagens no console para cada remoção realizada.
+    Remove o atributo 'somente leitura' de arquivos bloqueados (comum no OneDrive)
+    e tenta realizar a exclusão novamente.
     """
+    try:
+        os.chmod(path, stat.S_IWRITE)
+        func(path)
+    except Exception:
+        # Se o arquivo estiver sendo usado ativamente pelo interpretador, ignoramos.
+        pass
+
+def remove_pycache_and_pyc(root_dir=None):
+    """
+    Remove todas as pastas __pycache__ e arquivos .pyc recursivamente.
+    Se root_dir não for fornecido, usa o diretório onde este script está localizado.
+    """
+    if root_dir is None:
+        root_dir = os.path.dirname(os.path.abspath(__file__))
+
     for dirpath, dirnames, filenames in os.walk(root_dir):
-        # Remove __pycache__ folders
         if "__pycache__" in dirnames:
             pycache_path = os.path.join(dirpath, "__pycache__")
-            print(f"Removendo: {pycache_path}")
+            print(f"Limpando cache em: {pycache_path}")
             try:
-                shutil.rmtree(pycache_path)
-            except Exception as e:
-                print(f"Erro ao remover {pycache_path}: {e}")
+                shutil.rmtree(pycache_path, onerror=handle_remove_readonly)
+            except Exception:
+                pass
             dirnames.remove("__pycache__")
-        # Remove .pyc files
+        
+        # Varredura extra para arquivos .pyc soltos
         for filename in filenames:
             if filename.endswith(".pyc"):
                 pyc_path = os.path.join(dirpath, filename)
-                print(f"Removendo: {pyc_path}")
-                os.remove(pyc_path)
+                try:
+                    os.chmod(pyc_path, stat.S_IWRITE)
+                    os.remove(pyc_path)
+                except Exception:
+                    pass
 
 if __name__ == "__main__":
-    remove_pycache_and_pyc(os.getcwd())
+    print("Iniciando limpeza manual de cache...")
+    remove_pycache_and_pyc()
     print("Limpeza de cache concluída!")

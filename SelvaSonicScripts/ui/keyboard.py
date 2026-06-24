@@ -49,15 +49,7 @@ class KeyboardMIDI:
     def on_press(self, event):
         """
         Manipula o evento de tecla pressionada.
-
-        Parâmetros:
-            event: Evento do Tkinter contendo informações da tecla pressionada.
-
-        Notas:
-            - Permite mudança de oitava com '-' e '='.
-            - Aciona nota MIDI correspondente se válida e ainda não pressionada.
         """
-        # Ignora auto-repeat baseado em keycode (opcional)
         if event.keycode == self.last_keycode:
             return
         self.last_keycode = event.keycode
@@ -75,23 +67,40 @@ class KeyboardMIDI:
             note = note_info + self.octave_offset
             if 0 <= note <= 127 and note not in self.pressed_notes:
                 self.pressed_notes.add(note)
-                self.synth.note_on(note, 0.7)
+                
+                velocity = 0.70
+                
+                # 1. Envia a ordem para o Maestro (Áudio)
+                if hasattr(self.synth, 'note_on'):
+                    self.synth.note_on(note, velocity)
+                
+                # 2. Envia a ordem para a Interface (Visual)
+                if hasattr(self, 'status_callback') and self.status_callback:
+                    # Calcula a frequência para o painel
+                    freq = 440.0 * (2.0 ** ((note - 69) / 12.0))
+                    self.status_callback(is_on=True, note=note, freq=freq, velocity=velocity)
+
 
     def on_release(self, event):
         """
-        Manipula o evento de tecla liberada.
-
-        Parâmetros:
-            event: Evento do Tkinter contendo informações da tecla liberada.
-
-        Notas:
-            - Libera a nota MIDI correspondente se estiver ativa.
+        Manipula o evento de tecla solta.
         """
-        self.last_keycode = None  # Libera para próxima tecla
+        if event.keycode == self.last_keycode:
+            self.last_keycode = None
+
         key = event.char.lower() if event.char else ""
         note_info = self.key_to_note.get(key)
+        
         if isinstance(note_info, int):
             note = note_info + self.octave_offset
-            if 0 <= note <= 127 and note in self.pressed_notes:
+            if note in self.pressed_notes:
                 self.pressed_notes.remove(note)
-                self.synth.note_off(note)
+                
+                # 1. Desliga o áudio
+                if hasattr(self.synth, 'note_off'):
+                    self.synth.note_off(note)
+                
+                # 2. Desliga a interface visual se nenhuma tecla estiver pressionada
+                if hasattr(self, 'status_callback') and self.status_callback:
+                    if len(self.pressed_notes) == 0:
+                        self.status_callback(is_on=False)

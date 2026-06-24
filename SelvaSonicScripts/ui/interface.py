@@ -8,6 +8,8 @@ from .keyboard import KeyboardMIDI
 from synth.synth import MidiSynth
 from synth.file_io import save_config, load_config
 from synth.config import SynthConfig, WaveType
+
+# Importações de Controles e Lógica
 from .controls.envelope_controls import update_adsr, update_adsr_curve
 from .controls.modulation_controls import (
     update_lfo_freq, update_lfo_depth, update_lfo_target,
@@ -18,16 +20,18 @@ from .controls.filter_controls import (
     update_filter_type, update_filter_freq, update_filter_q
 )
 from .controls.polyphony_controls import update_polyphony
+
 from ui.controls.pulse_controls import update_pulse
 from ui.controls.supersaw_controls import update_ss_voices
 from ui.controls.aditive_controls import update_additive
-from ui.controls.envelope_controls import update_adsr
+
 import numpy as np
 import matplotlib
 matplotlib.use("TkAgg")
 import matplotlib.pyplot as plt
 from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg
 import soundfile as sf
+
 from synth.waveforms import generate_wave
 from synth.envelopes import calculate_adsr
 from .visuals import generate_static_wave, update_waveform_plot
@@ -40,7 +44,7 @@ from .widgets import (
 )
 
 # ─────────────────────────────────────────────────────────────────────────────
-#  Paleta SelvaSonic (espelhada aqui para uso direto)
+#  Paleta SelvaSonic (Fiel ao CSS)
 # ─────────────────────────────────────────────────────────────────────────────
 C_AMARELO  = "#F5C800"
 C_VERDE    = "#1A7A2E"
@@ -58,13 +62,7 @@ C_TEXTO2   = "#A09880"
 
 class FullSynthInterface:
     """
-    Interface gráfica SelvaSonic — estética Brasil + Jamaica.
-
-    Atributos:
-        master: Janela principal do Tkinter.
-        config: Configuração do sintetizador.
-        synth: Instância do sintetizador MIDI.
-        keyboard_midi: Instância do teclado MIDI virtual.
+    Interface gráfica SelvaSonic — Estética Brasil/Jamaica refinada.
     """
 
     def __init__(self, master, synth):
@@ -77,22 +75,31 @@ class FullSynthInterface:
         self.pressed_notes    = set()
 
         self.keyboard_midi = KeyboardMIDI(self.synth, self.master)
+        self.keyboard_midi.status_callback = self.update_note_status
+        
 
-        # ── Janela principal ──────────────────────────────────────────────────
+        # ── Configuração da Janela Principal ──────────────────────────────────
         self.master.configure(bg=C_BG)
-        self.master.title("SelvaSonic")
-        self.master.rowconfigure(2, weight=1)   # linha das abas expande
+        self.master.title("SelvaSonic Synthesizer")
+        
+        # O grid agora possui:
+        # row 0: Header
+        # row 1: Tab Bar
+        # row 2: Content Area (Expande)
+        # row 3: Waveform Area
+        # row 4: Teclado Help
+        # row 5: Footer
         self.master.columnconfigure(0, weight=1)
+        self.master.rowconfigure(2, weight=1)
 
-        # ── Sequência de construção da UI ─────────────────────────────────────
-        self._setup_ttk_styles()
-        self._build_header()          # row=0
-        self._build_tabs()            # row=1 (notebook) + row=2 (conteúdo)
-        self._build_waveform_area()   # row=3
-        self._build_keyboard_help()   # row=4
-        self._build_footer()          # row=5
+        # ── Construção da Interface ───────────────────────────────────────────
+        self._build_header()
+        self._build_custom_tabs_and_panels()
+        self._build_waveform_area()
+        self._build_keyboard_help()
+        self._build_footer()
 
-        # ── Inicialização final ───────────────────────────────────────────────
+        # ── Inicialização e Bindings ──────────────────────────────────────────
         self.update_waveform_visibility()
         self.update_filter_q_visibility()
         self.setup_bindings()
@@ -103,89 +110,48 @@ class FullSynthInterface:
         self.update_visuals()
 
     # ─────────────────────────────────────────────────────────────────────────
-    #  Estilos ttk (apenas para Notebook e Combobox — o resto é tk puro)
+    #  Header
     # ─────────────────────────────────────────────────────────────────────────
-
-    def _setup_ttk_styles(self):
-        style = ttk.Style()
-        style.theme_use("clam")
-
-        # Notebook container
-        style.configure("TNotebook",
-                         background=C_PRETO, borderwidth=0, tabmargins=[0, 0, 0, 0])
-        # Tabs
-        style.configure("TNotebook.Tab",
-                         background=C_PRETO, foreground=C_TEXTO2,
-                         padding=[20, 6],
-                         font=("Helvetica", 9, "bold"),
-                         borderwidth=0)
-        style.map("TNotebook.Tab",
-                  background=[("selected", C_AMARELO), ("active", C_BG3)],
-                  foreground=[("selected", C_PRETO),   ("active", C_AMARELO)])
-
-        # Combobox
-        style.configure("TCombobox",
-                         fieldbackground=C_BG3, background=C_BG3,
-                         foreground=C_TEXTO, bordercolor=C_MARROM,
-                         arrowcolor=C_AMARELO,
-                         selectbackground=C_MARROM, selectforeground=C_AMARELO)
-        style.map("TCombobox",
-                  fieldbackground=[("readonly", C_BG3)],
-                  foreground=[("readonly", C_TEXTO)])
-
-        # Scrollbar fina
-        style.configure("Vertical.TScrollbar",
-                         background=C_BG3, troughcolor=C_BG2,
-                         bordercolor=C_MARROM, arrowcolor=C_TEXTO2)
-
-    # ─────────────────────────────────────────────────────────────────────────
-    #  Header — faixa de cores + logo + status
-    # ─────────────────────────────────────────────────────────────────────────
-
     def _build_header(self):
-        """Topo: gradiente BR/JA, logo, indicador AO VIVO e nota atual."""
         hf = tk.Frame(self.master, bg=C_PRETO)
         hf.grid(row=0, column=0, sticky="ew")
         hf.columnconfigure(0, weight=1)
 
-        # Faixa de 3 px em 4 cores
+        # Gradiente 4 cores no topo
         stripe = tk.Canvas(hf, height=3, bg=C_PRETO, highlightthickness=0)
         stripe.grid(row=0, column=0, columnspan=2, sticky="ew")
         stripe.bind("<Configure>", lambda e: self._draw_stripe(stripe, e.width))
 
         # Logo
         logo_frame = tk.Frame(hf, bg=C_PRETO)
-        logo_frame.grid(row=1, column=0, sticky="w", padx=14, pady=6)
+        logo_frame.grid(row=1, column=0, sticky="w", padx=16, pady=8)
 
-        tk.Label(logo_frame, text="SELVA", font=("Helvetica", 20, "bold"), 
-         bg=C_PRETO, fg=C_VERDE).place(x=3, y=3) # Offset de 3px
-        tk.Label(logo_frame, text="SELVA", font=("Helvetica", 20, "bold"),
-                 bg=C_PRETO, fg=C_AMARELO).pack(side="left")
-        tk.Label(logo_frame, text="SONIC", font=("Helvetica", 20, "bold"), 
-         bg=C_PRETO, fg=C_AMARELO).place(x=3, y=3) # Offset de 3px
-        tk.Label(logo_frame, text="SONIC", font=("Helvetica", 20, "bold"),
-                 bg=C_PRETO, fg=C_VERDE).pack(side="left")
+        # Sombra simulada por deslocamento (offset de 3px)
+        lbl_selva_shadow = tk.Label(logo_frame, text="SELVA", font=("Bebas Neue", 22), bg=C_PRETO, fg=C_VERDE)
+        lbl_selva_shadow.place(x=3, y=3)
+        lbl_selva = tk.Label(logo_frame, text="SELVA", font=("Bebas Neue", 22), bg=C_PRETO, fg=C_AMARELO)
+        lbl_selva.pack(side="left")
 
-        # Status + nota
+        lbl_sonic_shadow = tk.Label(logo_frame, text="SONIC", font=("Bebas Neue", 22), bg=C_PRETO, fg=C_AMARELO)
+        lbl_sonic_shadow.place(x=lbl_selva.winfo_reqwidth() + 3, y=3)
+        lbl_sonic = tk.Label(logo_frame, text="SONIC", font=("Bebas Neue", 22), bg=C_PRETO, fg=C_VERDE)
+        lbl_sonic.pack(side="left")
+
+        # Indicador de Status e Nota
         right_frame = tk.Frame(hf, bg=C_PRETO)
-        right_frame.grid(row=1, column=1, sticky="e", padx=14, pady=6)
+        right_frame.grid(row=1, column=1, sticky="e", padx=16, pady=8)
 
-        live_box = tk.Frame(right_frame, bg="#0a2a12",
-                            highlightthickness=1, highlightbackground=C_VERDE)
+        live_box = tk.Frame(right_frame, bg="#1A7A2E", highlightthickness=1, highlightbackground=C_VERDE)
         live_box.pack(side="left", padx=(0, 10))
-        tk.Label(live_box, text="● AO VIVO",
-                 font=("Courier", 9, "bold"),
-                 bg="#0a2a12", fg=C_VERDE, padx=8, pady=3).pack()
+        tk.Label(live_box, text="● AO VIVO", font=("Space Mono", 10), bg=C_PRETO, fg=C_VERDE, padx=8, pady=3).pack()
 
         self.status_label = tk.Label(
             right_frame, text="NOTA: — | FREQ: — Hz | VEL: —",
-            font=("Courier", 8), bg=C_PRETO, fg=C_TEXTO2
+            font=("Space Mono", 10), bg=C_PRETO, fg=C_TEXTO2
         )
         self.status_label.pack(side="left")
 
-        # Linha separadora amarela
-        tk.Frame(hf, height=2, bg=C_AMARELO).grid(row=2, column=0,
-                                                    columnspan=2, sticky="ew")
+        tk.Frame(hf, height=2, bg=C_AMARELO).grid(row=2, column=0, columnspan=2, sticky="ew")
 
     @staticmethod
     def _draw_stripe(canvas, width):
@@ -193,26 +159,104 @@ class FullSynthInterface:
         seg = max(1, width // 4)
         colors = [C_AMARELO, C_VERDE, C_AZUL, C_VERMELHO]
         for i, c in enumerate(colors):
-            canvas.create_rectangle(i * seg, 0, (i + 1) * seg, 3,
-                                     fill=c, outline="")
+            canvas.create_rectangle(i * seg, 0, (i + 1) * seg, 3, fill=c, outline="")
+
+    def update_note_status(self, is_on, note=None, freq=None, velocity=None):
+        """
+        Atualiza os indicadores de Nota, Frequência e Velocity na barra superior (Header).
+        """
+        if is_on and note is not None:
+            # Formata os valores. Freq e Vel com 2 casas decimais.
+            status_text = f"NOTA: {note} | FREQ: {freq:.2f} Hz | VEL: {velocity:.2f}"
+            # Muda a cor para amarelo para dar destaque visual de "ligado"
+            self.status_label.config(text=status_text, fg=C_AMARELO)
+        else:
+            # Volta para o estado neutro/desligado
+            self.status_label.config(text="NOTA: — | FREQ: — Hz | VEL: —", fg=C_TEXTO2)
+
 
     # ─────────────────────────────────────────────────────────────────────────
-    #  Notebook de abas
+    #  Sistema Personalizado de Abas (Tabs) e Painéis
     # ─────────────────────────────────────────────────────────────────────────
+    def _build_custom_tabs_and_panels(self):
+        # Tab Bar Container
+        self.tab_bar = tk.Frame(self.master, bg=C_PRETO)
+        self.tab_bar.grid(row=1, column=0, sticky="ew")
+        tk.Frame(self.tab_bar, height=2, bg=C_MARROM).pack(side="bottom", fill="x")
 
-    def _build_tabs(self):
-        """Cria o Notebook e as 4 abas com seus respectivos painéis."""
-        self.notebook = ttk.Notebook(self.master)
-        self.notebook.grid(row=1, column=0, sticky="nsew", padx=8, pady=(6, 0))
-        self.master.rowconfigure(1, weight=1)
+        tab_container = tk.Frame(self.tab_bar, bg=C_PRETO)
+        tab_container.pack(side="left", padx=8)
 
-        # ── Oscilador ────────────────────────────────────────────────────────
-        osc_tab = tk.Frame(self.notebook, bg=C_BG2)
+        self.tab_buttons = {}
+        self.panels = {}
+        self.current_tab = None
+
+        tabs_info = [
+            ("osc", "Oscilador"),
+            ("adsr", "Envelope ADSR"),
+            ("mod", "Modulação/Filtros"),
+            ("sys", "Sistema")
+        ]
+
+        # Content Area onde os painéis serão embutidos
+        self.content_area = tk.Frame(self.master, bg=C_BG, highlightthickness=2, highlightbackground=C_AMARELO)
+        self.content_area.grid(row=2, column=0, sticky="nsew", padx=16, pady=(0, 8))
+
+        # Cria os botões (Canvas com formato de trapézio)
+        for tab_id, text in tabs_info:
+            btn = tk.Canvas(tab_container, width=150, height=32, bg=C_PRETO, highlightthickness=0, cursor="hand2")
+            btn.pack(side="left", padx=1)
+            
+            # Eventos
+            btn.bind("<Button-1>", lambda e, tid=tab_id: self.select_tab(tid))
+            btn.bind("<Enter>", lambda e, tid=tab_id: self._on_tab_hover(tid, True))
+            btn.bind("<Leave>", lambda e, tid=tab_id: self._on_tab_hover(tid, False))
+            
+            self.tab_buttons[tab_id] = {"canvas": btn, "text": text}
+
+        # Constrói o conteúdo interno
+        self._build_all_panels()
+        # Define a aba padrão
+        self.select_tab("osc")
+
+    def _on_tab_hover(self, tab_id, hovering):
+        if self.current_tab == tab_id: return
+        c = self.tab_buttons[tab_id]["canvas"]
+        # Atualiza apenas a cor do texto no hover se não estiver ativo
+        color = C_AMARELO if hovering else C_TEXTO2
+        c.itemconfig("text_element", fill=color)
+
+    def select_tab(self, tab_id):
+        self.current_tab = tab_id
+        
+        # Atualiza a interface gráfica das abas
+        for tid, data in self.tab_buttons.items():
+            c = data["canvas"]
+            text = data["text"]
+            c.delete("all")
+            
+            # Clip-path: polygon(6px 0, 100% 0, calc(100% - 6px) 100%, 0 100%)
+            pts = [6, 0, 150, 0, 144, 32, 0, 32]
+            
+            if tid == tab_id:
+                c.create_polygon(pts, fill=C_AMARELO, outline="")
+                c.create_text(75, 16, text=text.upper(), font=("Barlow Condensed", 11, "bold"), fill=C_PRETO, tags="text_element")
+            else:
+                c.create_text(75, 16, text=text.upper(), font=("Barlow Condensed", 11, "bold"), fill=C_TEXTO2, tags="text_element")
+
+        # Exibe apenas o painel correspondente
+        for tid, panel in self.panels.items():
+            if tid == tab_id:
+                panel.pack(fill="both", expand=True)
+            else:
+                panel.pack_forget()
+
+    def _build_all_panels(self):
+        # ── Aba 1: Oscilador
+        self.panels["osc"] = tk.Frame(self.content_area, bg=C_BG2)
         osc_widgets = create_oscillator_controls(
-            osc_tab, self.config,
-            self.on_waveform_change,
-            self.on_pulse,
-            self.on_ss_voices,
+            self.panels["osc"], self.config,
+            self.on_waveform_change, None, None
         )
         self.osc_frame        = osc_widgets["frame"]
         self.waveform_combo   = osc_widgets["waveform_combo"]
@@ -223,30 +267,23 @@ class FullSynthInterface:
         self.ss_voices_label  = osc_widgets["ss_voices_label"]
         self.ss_voices        = osc_widgets["ss_voices"]
 
-        self.pulse_scale.config(
-            command=lambda v: [
-                update_pulse(self.config, v, self.pulse_label),
-                self.synth.set_pulse_width(v),
-            ]
-        )
-        self.ss_voices.config(
-            command=lambda v: [
-                update_ss_voices(self.config, v, self.ss_voices_label),
-                self.synth.set_supersaw_voices(v),
-                self.update_visuals(),
-            ]
-        )
-        self.notebook.add(osc_tab, text="Oscilador")
+        # Callbacks customizados para os novos SelvaSliders
+        self.pulse_scale.command = lambda v: [
+            update_pulse(self.config, v, self.pulse_label),
+            self.synth.set_pulse_width(float(v))
+        ]
+        self.ss_voices.command = lambda v: [
+            update_ss_voices(self.config, v, self.ss_voices_label),
+            self.synth.set_supersaw_voices(int(float(v))),
+            self.update_visuals()
+        ]
 
-        # ── Envelope ADSR ────────────────────────────────────────────────────
-        env_tab = tk.Frame(self.notebook, bg=C_BG2)
+        # ── Aba 2: Envelope ADSR
+        self.panels["adsr"] = tk.Frame(self.content_area, bg=C_BG2)
         env_frame, env_sliders, env_labels, curve_combo = create_envelope_controls(
-            env_tab, self.config,
-            lambda param, v, lbl: [
-                update_adsr(self.config, param, v, lbl),
-                self.update_adsr_param(param, v),
-            ],
-            lambda e: update_adsr_curve(self.config, curve_combo),
+            self.panels["adsr"], self.config,
+            None, # Injetado manualmente abaixo
+            lambda e: update_adsr_curve(self.config, self.adsr_curve)
         )
         self.attack_slider  = env_sliders["attack"]
         self.decay_slider   = env_sliders["decay"]
@@ -257,124 +294,84 @@ class FullSynthInterface:
         self.sustain_label  = env_labels["sustain"]
         self.release_label  = env_labels["release"]
         self.adsr_curve     = curve_combo
-        self.env_frame      = env_frame
-        self.notebook.add(env_tab, text="Envelope (ADSR)")
+        
+        def _bind_adsr(slider_widget, param_name, label_widget):
+            slider_widget.command = lambda v: [
+                update_adsr(self.config, param_name, v, label_widget),
+                self.update_adsr_param(param_name, v)
+            ]
+            
+        _bind_adsr(self.attack_slider, "attack", self.attack_label)
+        _bind_adsr(self.decay_slider, "decay", self.decay_label)
+        _bind_adsr(self.sustain_slider, "sustain", self.sustain_label)
+        _bind_adsr(self.release_slider, "release", self.release_label)
 
-        # ── Modulação / Filtros ───────────────────────────────────────────────
-        mod_tab = tk.Frame(self.notebook, bg=C_BG2)
+        # ── Aba 3: Modulação e Filtros
+        self.panels["mod"] = tk.Frame(self.content_area, bg=C_BG2)
         mod_widgets = create_modulation_controls(
-            mod_tab, self.config,
+            self.panels["mod"], self.config,
             None, None, None, None, None, None,
-            None, None, None, None, None, None,
+            None, None, None, None, None, None
         )
-        # Reconecta callbacks com lógica de synth
-        mod_widgets["fm_freq"].config(
-            command=lambda v: [
-                update_fm_freq(self.config, v, mod_widgets["fm_freq_label"]),
-                setattr(self.synth.config, "fm_mod_freq", float(v)),
-            ]
-        )
-        mod_widgets["fm_index"].config(
-            command=lambda v: [
-                update_fm_index(self.config, v, mod_widgets["fm_index_label"]),
-                setattr(self.synth.config, "fm_mod_index", float(v)),
-            ]
-        )
-        mod_widgets["additive_scale"].config(
-            command=lambda v: update_additive(
-                self.config, v, mod_widgets["additive_label"]
-            )
-        )
-        mod_widgets["lfo_freq"].config(
-            command=lambda v: update_lfo_freq(
-                self.config, v, mod_widgets["lfo_freq_label"]
-            )
-        )
-        mod_widgets["lfo_depth"].config(
-            command=lambda v: update_lfo_depth(
-                self.config, v, mod_widgets["lfo_depth_label"]
-            )
-        )
-        mod_widgets["lfo_target"].bind(
-            "<<ComboboxSelected>>",
-            lambda e: update_lfo_target(self.config, mod_widgets["lfo_target"])
-        )
-        mod_widgets["hfo_freq"].config(
-            command=lambda v: update_hfo_freq(
-                self.config, v, mod_widgets["hfo_freq_label"]
-            )
-        )
-        mod_widgets["hfo_depth"].config(
-            command=lambda v: update_hfo_depth(
-                self.config, v, mod_widgets["hfo_depth_label"]
-            )
-        )
-        mod_widgets["hfo_target"].bind(
-            "<<ComboboxSelected>>",
-            lambda e: update_hfo_target(self.config, mod_widgets["hfo_target"])
-        )
-        mod_widgets["filter_type"].bind(
-            "<<ComboboxSelected>>",
-            lambda e: [
-                update_filter_type(self.config, mod_widgets["filter_type"]),
-                self.update_filter_q_visibility(),
-            ]
-        )
-        mod_widgets["filter_freq"].config(
-            command=lambda v: [
-                update_filter_freq(self.config, v, mod_widgets["filter_freq_label"]),
-                setattr(self.synth.config, "filter_freq", float(v)),
-            ]
-        )
-        mod_widgets["filter_q"].config(
-            command=lambda v: [
-                update_filter_q(self.config, v, mod_widgets["filter_q_label"]),
-                setattr(self.synth.config, "filter_q", float(v)),
-            ]
-        )
-        # Guarda referências para update_filter_q_visibility
+        mod_widgets["fm_freq"].command = lambda v: [
+            update_fm_freq(self.config, v, mod_widgets["fm_freq_label"]),
+            setattr(self.synth.config, "fm_mod_freq", float(v))
+        ]
+        mod_widgets["fm_index"].command = lambda v: [
+            update_fm_index(self.config, v, mod_widgets["fm_index_label"]),
+            setattr(self.synth.config, "fm_mod_index", float(v))
+        ]
+        mod_widgets["additive_scale"].command = lambda v: update_additive(self.config, v, mod_widgets["additive_label"])
+        
+        mod_widgets["lfo_freq"].command = lambda v: update_lfo_freq(self.config, v, mod_widgets["lfo_freq_label"])
+        mod_widgets["lfo_depth"].command = lambda v: update_lfo_depth(self.config, v, mod_widgets["lfo_depth_label"])
+        mod_widgets["lfo_target"].bind("<<ComboboxSelected>>", lambda e: update_lfo_target(self.config, mod_widgets["lfo_target"]))
+        
+        mod_widgets["hfo_freq"].command = lambda v: update_hfo_freq(self.config, v, mod_widgets["hfo_freq_label"])
+        mod_widgets["hfo_depth"].command = lambda v: update_hfo_depth(self.config, v, mod_widgets["hfo_depth_label"])
+        mod_widgets["hfo_target"].bind("<<ComboboxSelected>>", lambda e: update_hfo_target(self.config, mod_widgets["hfo_target"]))
+        
+        mod_widgets["filter_type"].bind("<<ComboboxSelected>>", lambda e: [
+            update_filter_type(self.config, mod_widgets["filter_type"]),
+            self.update_filter_q_visibility()
+        ])
+        mod_widgets["filter_freq"].command = lambda v: [
+            update_filter_freq(self.config, v, mod_widgets["filter_freq_label"]),
+            setattr(self.synth.config, "filter_freq", float(v))
+        ]
+        mod_widgets["filter_q"].command = lambda v: [
+            update_filter_q(self.config, v, mod_widgets["filter_q_label"]),
+            setattr(self.synth.config, "filter_q", float(v))
+        ]
+        
         self.filter_type    = mod_widgets["filter_type"]
         self.filter_q       = mod_widgets["filter_q"]
         self.filter_q_label = mod_widgets["filter_q_label"]
-        self.notebook.add(mod_tab, text="Modulação/Filtros")
 
-        # ── Sistema ───────────────────────────────────────────────────────────
-        sys_tab = tk.Frame(self.notebook, bg=C_BG2)
+        # ── Aba 4: Sistema
+        self.panels["sys"] = tk.Frame(self.content_area, bg=C_BG2)
         sys_widgets = create_system_controls(
-            sys_tab, self.config,
-            self.update_sample_rate,
-            self.update_buffer_size,
-            self.on_polyphony,
-            self.save_config_dialog,
-            self.load_config_dialog,
-            self.load_wavetable,
+            self.panels["sys"], self.config,
+            self.update_sample_rate, self.update_buffer_size,
+            self.on_polyphony, self.save_config_dialog,
+            self.load_config_dialog, self.load_wavetable
         )
         self.sample_rate     = sys_widgets["sample_rate"]
         self.buffer_size     = sys_widgets["buffer_size"]
         self.polyphony       = sys_widgets["polyphony"]
         self.polyphony_label = sys_widgets["polyphony_label"]
-        self.notebook.add(sys_tab, text="Sistema")
 
     # ─────────────────────────────────────────────────────────────────────────
-    #  Área do gráfico de forma de onda
+    #  Área do gráfico de forma de onda (Matplotlib)
     # ─────────────────────────────────────────────────────────────────────────
-
     def _build_waveform_area(self):
-        """Matplotlib embutido com fundo e estética SelvaSonic."""
-        wave_container = tk.Frame(self.master, bg=C_PRETO,
-                                   highlightthickness=1,
-                                   highlightbackground=C_MARROM)
-        wave_container.grid(row=2, column=0, sticky="ew", padx=8, pady=(4, 0))
+        wave_container = tk.Frame(self.master, bg=C_PRETO, highlightthickness=1, highlightbackground=C_MARROM)
+        wave_container.grid(row=3, column=0, sticky="ew", padx=16, pady=(4, 8))
 
-        # Título da área
         title_bar = tk.Frame(wave_container, bg=C_PRETO)
         title_bar.pack(fill="x")
         tk.Frame(title_bar, width=4, bg=C_VERDE).pack(side="left", fill="y")
-        tk.Label(title_bar,
-                 text="▶  WAVEFORM PREVIEW (AO VIVO)",
-                 font=("Courier", 9, "bold"),
-                 bg=C_PRETO, fg=C_VERDE,
-                 padx=8, pady=4).pack(side="left")
+        tk.Label(title_bar, text="▶ WAVEFORM PREVIEW (AO VIVO)", font=("Bebas Neue", 12), bg=C_PRETO, fg=C_VERDE, padx=8, pady=4).pack(side="left")
 
         self.fig, self.ax = plt.subplots(figsize=(8, 1.8), facecolor=C_PRETO)
         self._style_axes()
@@ -383,31 +380,29 @@ class FullSynthInterface:
         self.canvas_mpl.get_tk_widget().pack(fill="x", padx=4, pady=(0, 4))
 
     def _style_axes(self):
-        """Aplica estética escura aos eixos do matplotlib."""
         self.ax.set_facecolor(C_PRETO)
         self.ax.axhline(0, color='#333', lw=0.8, ls='--')
         self.fig.subplots_adjust(left=0, right=1, top=1, bottom=0)
         self.ax.spines["bottom"].set_color(C_AMARELO)
-        self.ax.spines["top"].set_visible(False)
-        self.ax.spines["right"].set_visible(False)
-        self.ax.spines["left"].set_visible(False)
+        for spine in ["top", "right", "left"]:
+            self.ax.spines[spine].set_visible(False)
         self.ax.set_xticks([])
         self.ax.set_yticks([])
         self.ax.set_ylim(-1.1, 1.1)
 
     # ─────────────────────────────────────────────────────────────────────────
-    #  Barra de teclado MIDI
+    #  Barra de ajuda do Teclado MIDI
     # ─────────────────────────────────────────────────────────────────────────
-
     def _build_keyboard_help(self):
-        kf = tk.Frame(self.master, bg=C_BG2,
-                       highlightthickness=1, highlightbackground=C_AZUL)
-        kf.grid(row=3, column=0, sticky="ew", padx=8, pady=(4, 0))
+        kf = tk.Frame(self.master, bg=C_BG2, highlightthickness=1, highlightbackground=C_AZUL)
+        kf.grid(row=4, column=0, sticky="ew", padx=16, pady=(0, 8))
 
         tk.Frame(kf, width=4, bg=C_AZUL).pack(side="left", fill="y")
-        tk.Label(kf, text="TECLADO MIDI",
-                 font=("Helvetica", 8, "bold"),
-                 bg=C_BG2, fg=C_AZUL, padx=8).pack(side="left")
+        
+        # Estética de tag militar/industrial
+        tag = tk.Frame(kf, bg=C_AZUL, padx=10, pady=2)
+        tag.pack(side="left", padx=(0, 16))
+        tk.Label(tag, text="TECLADO MIDI", font=("Bebas Neue", 12), bg=C_AZUL, fg=C_PRETO).pack()
 
         hints = [
             ("A–K", "Notas naturais"),
@@ -415,47 +410,29 @@ class FullSynthInterface:
             ("– / =", "Oitava ↓ / ↑"),
         ]
         for key, desc in hints:
-            tk.Label(kf,
-                     text=f"{key}: {desc}",
-                     font=("Courier", 8),
-                     bg=C_BG2, fg=C_TEXTO2,
-                     padx=12).pack(side="left")
+            tk.Label(kf, text=f"{key}: {desc}", font=("Space Mono", 9), bg=C_BG2, fg=C_TEXTO2, padx=12).pack(side="left")
 
     # ─────────────────────────────────────────────────────────────────────────
-    #  Footer — botão de pause
+    #  Rodapé
     # ─────────────────────────────────────────────────────────────────────────
-
     def _build_footer(self):
-        footer = tk.Frame(self.master, bg=C_PRETO,
-                           highlightthickness=1, highlightbackground=C_VERDE)
-        footer.grid(row=4, column=0, sticky="ew", padx=8, pady=(4, 8))
+        footer = tk.Frame(self.master, bg=C_PRETO, highlightthickness=1, highlightbackground=C_VERDE)
+        footer.grid(row=5, column=0, sticky="ew", padx=16, pady=(0, 16))
 
-        self.pause_button = _styled_button(
-            footer, "⏸  Pausar Visualização",
-            self.toggle_visual, accent=C_VERDE
-        )
+        self.pause_button = _styled_button(footer, "⏸ Pausar Visualização", self.toggle_visual, accent=C_VERDE)
         self.pause_button.pack(side="left", padx=8, pady=5)
 
-        # Versão
-        tk.Label(footer, text="SelvaSonic v1.0",
-                 font=("Courier", 8),
-                 bg=C_PRETO, fg=C_TEXTO2).pack(side="right", padx=10)
+        tk.Label(footer, text="SelvaSonic v1.0", font=("Space Mono", 10), bg=C_PRETO, fg=C_TEXTO2).pack(side="right", padx=10)
 
     # ─────────────────────────────────────────────────────────────────────────
-    #  Visuals — matplotlib loop
+    #  Visuals e Atualização Gráfica
     # ─────────────────────────────────────────────────────────────────────────
-
     def setup_visuals(self):
-        """Inicializa linha e fill reutilizáveis; evita recriação a cada frame."""
         self.wave_line = None
         self.wave_fill = None
         self.visual_update_id = None
 
     def update_visuals(self):
-        """
-        Atualiza o gráfico com o buffer mais recente da fila visual.
-        Roda a ~20 FPS; delega para after() ao invés de sleep.
-        """
         if self.visual_paused:
             self.visual_update_id = self.master.after(50, self.update_visuals)
             return
@@ -473,27 +450,18 @@ class FullSynthInterface:
                     self._style_axes()
                     duration  = len(mix) / (self.config.sample_rate / 4)
                     self.t_axis = np.linspace(0, duration, len(mix))
-                    self.wave_line, = self.ax.plot(
-                        self.t_axis, mix,
-                        color=C_VERDE, linewidth=1.8
-                    )
-                    self.wave_fill = self.ax.fill_between(
-                        self.t_axis, mix, 0,
-                        color=C_VERDE, alpha=0.25
-                    )
+                    self.wave_line, = self.ax.plot(self.t_axis, mix, color=C_VERDE, linewidth=1.8)
+                    self.wave_fill = self.ax.fill_between(self.t_axis, mix, 0, color=C_VERDE, alpha=0.25)
                     self.canvas_mpl.draw()
                 else:
                     self.wave_line.set_ydata(mix)
                     if self.wave_fill in self.ax.collections:
                         self.wave_fill.remove()
-                    self.wave_fill = self.ax.fill_between(
-                        self.t_axis, mix, 0,
-                        color=C_AMARELO, alpha=0.18
-                    )
+                    self.wave_fill = self.ax.fill_between(self.t_axis, mix, 0, color=C_AMARELO, alpha=0.18)
                     self.canvas_mpl.draw_idle()
 
         except Exception:
-            pass  # Nunca derruba o motor de áudio
+            pass  # Prevenção rigorosa contra queda do motor de áudio
 
         self.visual_update_id = self.master.after(50, self.update_visuals)
 
@@ -503,13 +471,12 @@ class FullSynthInterface:
         self.visual_update_id = self.master.after(100, self.update_visuals)
 
     def toggle_visual(self):
-        """Alterna pause/play da visualização."""
         self.visual_paused = not self.visual_paused
-        new_text = (
-            "▶  Retomar Visualização" if self.visual_paused
-            else "⏸  Pausar Visualização"
-        )
-        self.pause_button.config(text=new_text.upper())
+        
+        # Atualizar texto no Custom Button exige acessar as children do Frame
+        lbl = self.pause_button.winfo_children()[1] 
+        new_text = "▶ Retomar Visualização" if self.visual_paused else "⏸ Pausar Visualização"
+        lbl.config(text=new_text.upper())
 
         if self.visual_paused:
             t = np.linspace(0, 0.03, 500)
@@ -519,13 +486,11 @@ class FullSynthInterface:
             self.canvas_mpl.draw()
 
     # ─────────────────────────────────────────────────────────────────────────
-    #  Bindings e visibilidade condicional
+    #  Bindings e Visibilidade Condicional
     # ─────────────────────────────────────────────────────────────────────────
-
     def setup_bindings(self):
         self.waveform_combo.bind("<<ComboboxSelected>>", self.on_waveform_change)
-        self.adsr_curve.bind("<<ComboboxSelected>>",
-                              lambda e: update_adsr_curve(self.config, self.adsr_curve))
+        self.adsr_curve.bind("<<ComboboxSelected>>", lambda e: update_adsr_curve(self.config, self.adsr_curve))
         self.master.protocol("WM_DELETE_WINDOW", self.on_close)
         self.master.bind_all("<Key>", self.block_keyboard_input)
         self.master.bind("<Control-s>", lambda e: self.save_config_dialog())
@@ -548,8 +513,8 @@ class FullSynthInterface:
     def update_filter_q_visibility(self):
         filter_type = getattr(self, "filter_type", None)
         if filter_type and filter_type.get() == "bandpass":
-            self.filter_q.pack(fill="x")
-            self.filter_q_label.pack()
+            self.filter_q.pack(fill="x", expand=True)
+            self.filter_q_label.pack(side="right")
         else:
             try:
                 self.filter_q.pack_forget()
@@ -558,25 +523,18 @@ class FullSynthInterface:
                 pass
 
     # ─────────────────────────────────────────────────────────────────────────
-    #  Callbacks de controle
+    #  Callbacks de controle do Sintetizador
     # ─────────────────────────────────────────────────────────────────────────
-
     def on_waveform_change(self, event):
         new_wave = WaveType(self.waveform_combo.get())
         self.config.default_waveform = new_wave
         self.synth.set_waveform(new_wave)
         self.update_waveform_visibility()
 
-    def on_pulse(self, value, label=None):
-        update_pulse(self.config, value, label or self.pulse_label)
-
-    def on_ss_voices(self, value, label=None):
-        update_ss_voices(self.config, value, label or self.ss_voices_label)
-
     def on_polyphony(self, value, label=None):
         update_polyphony(self.config, value, label)
         if hasattr(self.synth, "set_polyphony"):
-            self.synth.set_polyphony(value)
+            self.synth.set_polyphony(int(float(value)))
 
     def update_adsr_param(self, param, value):
         if param in ("attack", "decay", "release"):
@@ -584,12 +542,7 @@ class FullSynthInterface:
         elif param == "sustain":
             setattr(self.synth.config, "sustain_level", float(value))
 
-    # ─────────────────────────────────────────────────────────────────────────
-    #  Sincronização UI ↔ config
-    # ─────────────────────────────────────────────────────────────────────────
-
     def update_controls_from_config(self):
-        """Sincroniza todos os controles com self.config após load."""
         self.waveform_combo.set(self.config.default_waveform.value)
         self.pulse_scale.set(self.config.pulse_width)
         self.pulse_label.config(text=f"{self.config.pulse_width:.2f}")
@@ -614,9 +567,8 @@ class FullSynthInterface:
         self.update_waveform_visibility()
 
     # ─────────────────────────────────────────────────────────────────────────
-    #  I/O: config e wavetable
+    #  I/O de Configuração e Wavetable
     # ─────────────────────────────────────────────────────────────────────────
-
     def save_config_dialog(self):
         path = filedialog.asksaveasfilename(
             defaultextension=".json",
@@ -637,39 +589,31 @@ class FullSynthInterface:
             old_rate = self.config.sample_rate
             load_config(self.config, filename=path)
             if self.config.sample_rate != old_rate:
-                self.config.bandlimited_tables = generate_bandlimited_tables(
-                    self.config.sample_rate
-                )
+                self.config.bandlimited_tables = generate_bandlimited_tables(self.config.sample_rate)
                 self.restart_audio_stream()
             self.synth.config = self.config
             self.update_controls_from_config()
             messagebox.showinfo("SelvaSonic", "Configuração carregada com sucesso!")
 
     def load_wavetable(self):
-        path = filedialog.askopenfilename(
-            filetypes=[("WAV Files", "*.wav")],
-            title="Carregar Wavetable",
-        )
+        path = filedialog.askopenfilename(filetypes=[("WAV Files", "*.wav")], title="Carregar Wavetable")
         if path:
             try:
                 data, _ = sf.read(path)
                 if data is None or len(data) == 0:
                     raise ValueError("Arquivo WAV inválido ou vazio.")
-                self.config.wavetable      = data
+                self.config.wavetable = data
                 self.synth.config.wavetable = data
             except Exception as e:
                 messagebox.showerror("SelvaSonic", f"Erro ao carregar wavetable:\n{e}")
 
     # ─────────────────────────────────────────────────────────────────────────
-    #  Sample rate / buffer — reinício do stream
+    #  Gestão de Áudio
     # ─────────────────────────────────────────────────────────────────────────
-
     def update_sample_rate(self, event):
         try:
             self.config.sample_rate = int(self.sample_rate.get())
-            self.config.bandlimited_tables = generate_bandlimited_tables(
-                self.config.sample_rate
-            )
+            self.config.bandlimited_tables = generate_bandlimited_tables(self.config.sample_rate)
             self.restart_audio_stream()
         except Exception as e:
             print(f"Erro ao atualizar sample rate: {e}")
@@ -683,27 +627,48 @@ class FullSynthInterface:
 
     def restart_audio_stream(self):
         try:
-            if self.synth:
-                self.synth.stop()
+            if self.synth: self.synth.stop()
             self.synth = MidiSynth(self.config)
             self.synth.start()
             self.keyboard_midi.synth = self.synth
         except Exception as e:
             print(f"Erro ao reiniciar stream de áudio: {e}")
 
-    # ─────────────────────────────────────────────────────────────────────────
-    #  Fechamento
-    # ─────────────────────────────────────────────────────────────────────────
-
     def on_close(self):
-        if self.visual_update_id:
-            self.master.after_cancel(self.visual_update_id)
-            self.visual_update_id = None
-        if hasattr(self, "synth") and self.synth:
-            self.synth.stop()
-            if hasattr(self.synth, "on_close"):
-                self.synth.on_close()
-        if hasattr(self, "keyboard_midi") and self.keyboard_midi:
-            if hasattr(self.keyboard_midi, "stop"):
-                self.keyboard_midi.stop()
-        self.master.destroy()
+            # 1. Para os processos visuais e de áudio
+            if self.visual_update_id:
+                self.master.after_cancel(self.visual_update_id)
+                self.visual_update_id = None
+            if hasattr(self, "synth") and self.synth:
+                self.synth.stop()
+                if hasattr(self.synth, "on_close"):
+                    self.synth.on_close()
+            if hasattr(self, "keyboard_midi") and self.keyboard_midi:
+                if hasattr(self.keyboard_midi, "stop"):
+                    self.keyboard_midi.stop()
+            
+            # 2. Destrói a interface gráfica
+            self.master.destroy()
+
+            # 3. Executa a limpeza do cache silenciosamente no background
+            #lazy_load = True
+            try:
+                import os
+                import sys
+                
+                # Localiza a raiz do projeto (pasta SelvaSonicScripts)
+                root_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+                
+                # Adiciona ao sys.path para garantir que consegue achar o cleancache.py
+                if root_dir not in sys.path:
+                    sys.path.append(root_dir)
+                
+                # Importa e roda o limpador
+                from cleancache import remove_pycache_and_pyc
+                remove_pycache_and_pyc(root_dir)
+                print("[SelvaSonic] Encerrado com sucesso. Cache limpo.")
+                
+            except ImportError:
+                print("[SelvaSonic] Encerrado. (Aviso: script cleancache.py não encontrado para limpeza automática).")
+            except Exception as e:
+                print(f"[SelvaSonic] Encerrado. (Aviso na limpeza de cache: {e})")
