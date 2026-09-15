@@ -67,3 +67,52 @@ SelvaSonic/
     │   ├── interface.py, keyboard.py, visuals.py
     │   └── controls/              # Controles modulares (Supersaw, Pulse, Filter, etc.)
     └── tests/                     # Suíte de testes unitários
+```
+
+</details>
+
+---
+
+## 🚀 Como Executar o Projeto
+
+> **Nota:** Como as bibliotecas específicas não estavam no zip, certifique-se de ajustar este bloco caso use bibliotecas de interface ou áudio específicas (como PyQt5, Tkinter, SoundDevice, Mido, etc).
+
+### Pré-requisitos
+
+* Python 3.x
+* Recomenda-se o uso de um ambiente virtual (`venv`).
+
+### Instalação e Execução
+
+1. Clone o repositório:
+```bash
+git clone https://github.com/gabrieltomasicode/SelvaSonic.git
+```
+
+2. Acesse o diretório do projeto:
+```bash
+cd SelvaSonic
+```
+
+3. Instale as dependências necessárias:
+```bash
+pip install -r requirements.txt
+```
+
+4. Para iniciar o sintetizador e abrir a interface gráfica, execute o script principal localizado na pasta de scripts:
+```bash
+python SelvaSonicScripts/main.py
+```
+
+---
+
+## ✒️ Autor
+
+<div align="center">
+  <strong>Gabriel Tomasi de Melo</strong><br>
+  <em>Estudante de Análise e Desenvolvimento de Sistemas na Universidade do Vale do Rio dos Sinos (Unisinos).</em>
+  <br><br>
+  <a href="https://github.com/gabrieltomasicode">
+    <img src="https://img.shields.io/badge/GitHub-181717?style=for-the-badge&logo=github&logoColor=white" alt="GitHub Profile" />
+  </a>
+</div>
